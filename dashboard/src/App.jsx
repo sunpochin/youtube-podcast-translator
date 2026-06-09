@@ -15,6 +15,7 @@ function App() {
   
   // 逐字稿狀態與翻譯狀態
   const [videoId, setVideoId] = useState(null)
+  const [videoTitle, setVideoTitle] = useState('') // 影片原始標題
   const [transcript, setTranscript] = useState([])
   const [summary, setSummary] = useState('')
   const [translatedParagraphs, setTranslatedParagraphs] = useState([])
@@ -52,6 +53,7 @@ function App() {
     setTranscript([])
     setSummary('')
     setTranslatedParagraphs([])
+    setVideoTitle('') // 重設影片標題
     setTranslationProgress(0) // 重設進度
     setPublishTitle('')
     setPublishMessage(null)
@@ -66,6 +68,7 @@ function App() {
       if (res.ok) {
         setVideoId(data.videoId)
         setTranscript(data.transcript)
+        setVideoTitle(data.title || '') // 儲存影片原始標題
       } else {
         setError(data.error || '無法取得字幕')
       }
@@ -95,7 +98,8 @@ function App() {
           transcript, 
           videoId,
           password,
-          mode: translationMode
+          mode: translationMode,
+          title: videoTitle // 傳送影片原始標題給後端翻譯
         })
       })
 
@@ -104,6 +108,7 @@ function App() {
         throw new Error(errorData.error || '翻譯請求失敗')
       }
 
+      // 逐步讀取 SSE 串流資料
       const reader = res.body.getReader()
       const decoder = new TextDecoder('utf-8')
       let buffer = ''
@@ -131,7 +136,8 @@ function App() {
               } else if (packet.type === 'error') {
                 throw new Error(packet.error || '翻譯中途發生錯誤')
               } else if (packet.type === 'done') {
-                setPublishTitle(`Podcast 翻譯 - 影片 ${videoId}`)
+                // 收到完成事件，更新標題並切換 Tab
+                setPublishTitle(packet.defaultTitle || `Podcast 翻譯 - 影片 ${videoId}`)
                 setActiveTab('summary')
               }
             } catch (jsonErr) {
@@ -171,7 +177,8 @@ function App() {
       })
       const data = await res.json()
       if (res.ok) {
-        setPublishMessage({ success: true, text: data.message })
+        // 成功發佈時，儲存訊息與直達連結
+        setPublishMessage({ success: true, text: data.message, url: data.url })
       } else {
         setPublishMessage({ success: false, text: data.error || '發佈失敗' })
       }
@@ -334,7 +341,7 @@ function App() {
                       <Clock size={12} />
                       長度: {transcript.length > 0 ? formatTime(transcript[transcript.length - 1].start) : '0:00'}
                     </span>
-                    <h3 className="font-semibold text-base text-white/90">字幕抓取成功！</h3>
+                    <h3 className="font-semibold text-base text-white/90">{videoTitle || '字幕抓取成功！'}</h3>
                     <p className="text-sm text-spotify-text mt-1">
                       共抓取到 {transcript.length} 段字幕片段。現在可以使用 Gemini 將其翻譯為繁體中文對照，並分析核心大綱。
                     </p>
@@ -419,8 +426,18 @@ function App() {
                             </button>
                             
                             {publishMessage && (
-                              <div className={`mt-2 p-3 rounded-lg text-xs border ${publishMessage.success ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-400' : 'bg-red-950/40 border-red-500/30 text-red-400'}`}>
-                                {publishMessage.text}
+                              <div className={`mt-2 p-3 rounded-lg text-xs border text-left ${publishMessage.success ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-400' : 'bg-red-950/40 border-red-500/30 text-red-400'}`}>
+                                <div className="font-semibold">{publishMessage.text}</div>
+                                {publishMessage.success && publishMessage.url && (
+                                  <a 
+                                    href={publishMessage.url} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer" 
+                                    className="mt-2 block font-bold text-spotify-green hover:underline cursor-pointer"
+                                  >
+                                    👉 點此直接打開 GitBook 頁面
+                                  </a>
+                                )}
                               </div>
                             )}
                           </div>

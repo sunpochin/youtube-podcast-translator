@@ -203,32 +203,36 @@ Podcast 內容：
 
 // 2. 呼叫 Gemini 2.5 Flash 或 Ollama 進行中英翻譯與分段摘要的 API (採用 SSE 串流傳輸)
 app.post('/api/translate', async (req, res) => {
-  const { transcript, videoId, mode, password } = req.body;
+  const { transcript, videoId, mode, password, title } = req.body;
   if (!transcript || !Array.isArray(transcript)) {
     return res.status(400).json({ error: '無效的字幕資料' });
   }
 
+  // 預設使用 Ollama 模式 (免費)，可傳入 'gemini' 參數以切換
   const isGeminiMode = mode === 'gemini';
 
+  // 外部 IP 如果想要切換成 Gemini 模式，強制校驗密碼保護錢包
   if (isGeminiMode && !isLocalRequest(req)) {
     if (!password || password !== ACCESS_PASSWORD) {
       return res.status(401).json({ error: '訪問密碼無效，外部用戶無法直接呼叫雲端付費 Gemini 引擎！' });
     }
   }
 
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive'
-  });
+  // 設定 Server-Sent Events (SSE) 標頭
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
 
+  // 監聽連線中斷，用於在使用者關閉視窗時停止剩餘的翻譯，節省運算與 Token 資源
   let connectionClosed = false;
   req.on('close', () => {
     connectionClosed = true;
-    console.log(`[連線中斷] 用戶關閉了連線，終止翻譯任務`);
+    console.log(`[連線中斷] 用戶已關閉 Video ID: ${videoId} 的翻譯連線`);
   });
 
   try {
+    // 為了降低 API 呼叫次數並節省 Token，我們將字幕段落進行分塊 (每 35 句合併為一個段落)
     const chunks = [];
     let currentChunk = [];
     
@@ -242,20 +246,67 @@ app.post('/api/translate', async (req, res) => {
 
     console.log(`[開始翻譯] 影片 ID: ${videoId}, 模式: ${mode}, 總分段數: ${chunks.length}`);
 
-    const results = [];
-    
-    for (let i = 0; i < chunks.length; i++) {
-      if (connectionClosed) break;
+    // 翻譯影片標題 (如果前端有提供原始標題的話)
+    let finalTitle = `Podcast 翻譯 - 影片 ${videoId}`;
+    if (title && !connectionClosed) {
+      console.log(`[進行中] 翻譯影片標題: ${title}`);
+      const titlePrompt = `
+請將以下這段英文的影片標題進行精確、流暢的繁體中文（台灣習慣用語）翻譯。
 
-      console.log(`[進行中] 翻譯分段 ${i + 1}/${chunks.length}...`);
+翻譯規範：
+1. 輸出格式必須僅包含翻譯後的繁體中文，不要包含任何前導詞、說明或引號。
+
+影片標題：
+"${title}"
+`;
+      let translatedTitle = '';
+      if (isGeminiMode) {
+        const titleResponse = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: titlePrompt,
+        });
+        translatedTitle = titleResponse.text ? titleResponse.text.trim() : '';
+      } else {
+        try {
+          translatedTitle = await enqueueOllamaTask(() => translateWithOllama(title, 'qwen2.5:14b'));
+        } catch (ollamaErr) {
+          try {
+            translatedTitle = await enqueueOllamaTask(() => translateWithOllama(title, 'qwen2.5:7b'));
+          } catch (err) {
+            translatedTitle = '';
+          }
+        }
+      }
+
+      if (translatedTitle) {
+        // 去除外圍可能的多餘引號或括號
+        translatedTitle = translatedTitle.replace(/^["'「」（(]+|["'「」（)]+$/g, '').trim();
+        finalTitle = `${translatedTitle} - ${title}`;
+      } else {
+        finalTitle = title;
+      }
+      console.log(`[完成] 標題翻譯結果: ${finalTitle}`);
+    }
+
+    const results = [];
+
+    // 依序翻譯每個分段並即時串流推送給前端
+    for (let i = 0; i < chunks.length; i++) {
+      if (connectionClosed) {
+        console.log(`[停止翻譯] 連線已中斷，停止翻譯後續分段 (${i + 1}/${chunks.length})`);
+        break;
+      }
+
       const chunk = chunks[i];
       const startTime = chunk[0].start;
       const endTime = chunk[chunk.length - 1].start + chunk[chunk.length - 1].duration;
       const englishText = chunk.map(c => c.text).join(' ');
 
+      console.log(`[進行中] 翻譯分段 ${i + 1}/${chunks.length}...`);
       let chineseText = '';
 
       if (isGeminiMode) {
+        // 1. 使用 Gemini API 雲端翻譯
         const prompt = `
 您是一位專業的同聲傳譯與 Podcast 導讀專家。請將以下這段 Podcast 的英文字幕段落進行精確、流暢的繁體中文（台灣習慣用語）翻譯。
 
@@ -274,12 +325,15 @@ app.post('/api/translate', async (req, res) => {
         });
         chineseText = response.text ? response.text.trim() : '（翻譯失敗）';
       } else {
+        // 2. 預設：使用本地 Mac Mini Ollama (使用 Queue 佇列排隊保護)
         try {
           chineseText = await enqueueOllamaTask(() => translateWithOllama(englishText, 'qwen2.5:14b'));
         } catch (ollamaErr) {
+          // Ollama 連接錯誤或缺少 14b，退化使用 7b 嘗試
           try {
             chineseText = await enqueueOllamaTask(() => translateWithOllama(englishText, 'qwen2.5:7b'));
           } catch (errInner) {
+            // 完全無法使用 Ollama 時，拋出詳細指引
             throw new Error('本地 Ollama 服務未開啟，請在 Mac Mini 終端機執行 `ollama run qwen2.5:14b`，或切換為雲端 Gemini 模式。');
           }
         }
@@ -294,10 +348,12 @@ app.post('/api/translate', async (req, res) => {
       };
       results.push(resultItem);
 
+      // 計算目前翻譯完成百分比並推送給前端
       const progress = Math.round(((i + 1) / chunks.length) * 100);
       res.write(`data: ${JSON.stringify({ type: 'chunk', chunk: resultItem, progress })}\n\n`);
     }
 
+    // 當所有分段翻譯完畢，且連線未中斷時，生成整集大綱摘要
     if (!connectionClosed) {
       console.log(`[進行中] 生成整集大綱摘要中...`);
       const fullEnglishText = results.map(r => r.english).slice(0, 8).join(' ');
@@ -329,8 +385,9 @@ Podcast 內容：
         }
       }
 
+      // 推送大綱摘要並標記翻譯全部完成
       res.write(`data: ${JSON.stringify({ type: 'summary', summary: summaryText })}\n\n`);
-      res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'done', defaultTitle: finalTitle })}\n\n`);
       console.log(`[成功完成] Video ID: ${videoId} 翻譯完成`);
     }
 
@@ -338,10 +395,28 @@ Podcast 內容：
 
   } catch (err) {
     console.error('AI 翻譯失敗:', err);
+    // 發生錯誤時將錯誤訊息經由 SSE 推送至前端，以利前端提示使用者
     res.write(`data: ${JSON.stringify({ type: 'error', error: err.message || '翻譯過程中發生未知錯誤' })}\n\n`);
     res.end();
   }
 });
+
+// 輔助函式：將字串轉為 URL 友善的 Slug 格式，需與 GitBook 發布器一致
+function generateSlug(text) {
+  return text
+    .toString()
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, '-')
+    .replace(/[^\w\-\u4e00-\u9fa5]+/g, '')
+    .replace(/\-\-+/g, '-');
+}
+
+// 輔助執行 shell 指令
+import { execFile } from 'child_process';
+import util from 'util';
+import fs from 'fs/promises';
+const execFilePromise = util.promisify(execFile);
 
 // 3. 將翻譯發行到 GitBook
 app.post('/api/gitbook/publish', verifyGitBookPassword, async (req, res) => {
@@ -365,9 +440,12 @@ app.post('/api/gitbook/publish', verifyGitBookPassword, async (req, res) => {
     const fullFilePath = path.join(podcastDir, fileName);
     const relativeFilePath = `podcast-translations/${fileName}`;
 
-    // 組裝 Markdown 內容
+    // 組裝 Markdown 內容 (提供新分頁開啟連結，並嵌入 YouTube 播放器以利在手機上邊聽邊看)
     let mdContent = `# 🎙️ ${title}\n\n`;
-    mdContent += `> 影片網址: [YouTube 連結](https://youtube.com/watch?v=${videoId})\n\n`;
+    mdContent += `> 影片連結: <a href="https://youtube.com/watch?v=${videoId}" target="_blank" rel="noopener noreferrer">YouTube 網頁連結 (新分頁開啟)</a>\n\n`;
+    mdContent += `### 影片嵌入觀看 (可邊放邊對照)\n`;
+    mdContent += `<iframe width="100%" height="400" src="https://www.youtube.com/embed/${videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>\n\n`;
+    
     if (summary) {
       mdContent += `## 核心主旨與關鍵看點\n\n${summary}\n\n`;
     }
@@ -405,20 +483,21 @@ app.post('/api/gitbook/publish', verifyGitBookPassword, async (req, res) => {
       await fs.writeFile(summaryPath, summaryContent, 'utf-8');
     }
 
-    // 執行 Gitops push
+    // 執行 Gitops push 並回傳 GitBook 頁面的網址
+    const gitbookPageUrl = `https://sunpochin.gitbook.io/social-dancing-notes/podcast-translations/${slug}`;
     try {
       const { stdout: branchStdout } = await execFilePromise('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: gitbookDir });
       const currentBranch = branchStdout.trim();
       await execFilePromise('git', ['add', '.'], { cwd: gitbookDir });
       await execFilePromise('git', ['commit', '-m', `docs(podcast): add translation for ${title}`], { cwd: gitbookDir });
       await execFilePromise('git', ['push', 'origin', currentBranch], { cwd: gitbookDir });
-      res.json({ success: true, message: `成功推送至 GitBook origin/${currentBranch} 分支！` });
+      res.json({ success: true, message: `成功推送至 GitBook origin/${currentBranch} 分支！`, url: gitbookPageUrl });
     } catch (gitErr) {
       // 捕獲 nothing to commit 的警告
       if (gitErr.message.includes('nothing to commit') || gitErr.message.includes('working tree clean')) {
-        return res.json({ success: true, message: '檔案已寫入本地，內容無變更無需推送。' });
+        return res.json({ success: true, message: '檔案已寫入本地，內容無變更無需推送。', url: gitbookPageUrl });
       }
-      res.json({ success: true, message: `檔案已成功寫入，但 Git 推送失敗: ${gitErr.message}` });
+      res.json({ success: true, message: `檔案已成功寫入，但 Git 推送失敗: ${gitErr.message}`, url: gitbookPageUrl });
     }
 
   } catch (err) {
