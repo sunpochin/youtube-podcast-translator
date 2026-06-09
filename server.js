@@ -413,6 +413,35 @@ function generateSlug(text) {
     .replace(/\-\-+/g, '-');
 }
 
+// 輔助函式：產生 URL 友善的純英文/數字 Slug，防止中文被 GitBook 轉成拼音
+function generateCleanSlug(title, videoId) {
+  // 1. 先嘗試只提取英文、數字字元來產生 Slug
+  const cleanEnglish = title
+    .toString()
+    .replace(/[\u4e00-\u9fa5]+/g, '') // 移除中文
+    .replace(/[^\w\s\-]+/g, '')      // 移除特殊字元
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '-')
+    .replace(/\-\-+/g, '-');
+
+  // 去除開頭與結尾的連字號
+  const finalEnglish = cleanEnglish.replace(/^-+|-+$/g, '');
+
+  if (finalEnglish && finalEnglish.length > 3) {
+    return finalEnglish;
+  }
+
+  // 2. 如果純英文長度不足或為空，則降級使用傳統含中文的 slug 產生方式 (GitBook 會將其轉為拼音)
+  const fallback = generateSlug(title);
+  if (fallback && fallback.replace(/^-+|-+$/g, '')) {
+    return fallback.replace(/^-+|-+$/g, '');
+  }
+
+  // 3. 最末端防護：直接使用影片 ID
+  return videoId;
+}
+
 // 輔助執行 shell 指令
 import { execFile } from 'child_process';
 import util from 'util';
@@ -426,8 +455,20 @@ app.post('/api/gitbook/publish', verifyGitBookPassword, async (req, res) => {
     return res.status(400).json({ error: '缺少必要發佈參數' });
   }
 
-  // 取得 GitBook 目錄位置，預設退化至 ../interview/social-dancing-notes
-  const gitbookDir = process.env.GITBOOK_PATH || path.resolve(process.cwd(), '../interview/social-dancing-notes');
+  // 取得 GitBook 目錄位置，預設嘗試同級目錄 ../social-dancing-notes，若不存在則退化至原路徑
+  let gitbookDir = process.env.GITBOOK_PATH;
+  if (!gitbookDir) {
+    const siblingPath = path.resolve(process.cwd(), '../social-dancing-notes');
+    const legacyPath = path.resolve(process.cwd(), '../interview/social-dancing-notes');
+    let isSibling = false;
+    try {
+      await fs.access(siblingPath);
+      isSibling = true;
+    } catch (e) {
+      isSibling = false;
+    }
+    gitbookDir = isSibling ? siblingPath : legacyPath;
+  }
   const podcastDir = path.join(gitbookDir, 'podcast-translations');
   const summaryPath = path.join(gitbookDir, 'SUMMARY.md');
 
@@ -449,7 +490,7 @@ app.post('/api/gitbook/publish', verifyGitBookPassword, async (req, res) => {
     await fs.mkdir(podcastDir, { recursive: true });
 
     // 產生檔名
-    const slug = generateSlug(title) || videoId;
+    const slug = generateCleanSlug(title, videoId);
     const fileName = `${slug}.md`;
     const fullFilePath = path.join(podcastDir, fileName);
     const relativeFilePath = `podcast-translations/${fileName}`;
