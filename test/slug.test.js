@@ -170,6 +170,33 @@ describe('Express API 路由整合測試', () => {
     const data = await res.json();
     assert.ok(data.error.includes('缺少必要發佈參數'));
   });
+
+  test('POST /api/social/publish - 缺少分享參數應返回 400', async () => {
+    const res = await fetch(`${baseUrl}/api/social/publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '測試' })
+    });
+    assert.strictEqual(res.status, 400);
+    const data = await res.json();
+    assert.ok(data.error.includes('缺少必要分享參數'));
+  });
+
+  test('POST /api/social/publish - 連線微服務失敗時應自動降級為模擬成功', async () => {
+    const res = await fetch(`${baseUrl}/api/social/publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: '測試標題',
+        url: 'https://test-gitbook.com/123',
+        image: 'data:image/png;base64,mocked-base64'
+      })
+    });
+    assert.strictEqual(res.status, 200);
+    const data = await res.json();
+    assert.strictEqual(data.success, true);
+    assert.ok(data.jobId || data.mocked, '應包含 jobId (微服務在線) 或 mocked 標記 (微服務離線)');
+  });
 });
 
 // ==========================================

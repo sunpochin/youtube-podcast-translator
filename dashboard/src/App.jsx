@@ -34,6 +34,12 @@ function App() {
   const [isPublishing, setIsPublishing] = useState(false)
   const [publishMessage, setPublishMessage] = useState(null)
 
+  // 社交分享與 IG Story 卡片狀態
+  const [showShareModal, setShowShareModal] = useState(false)
+  const [sharingToMicroservice, setSharingToMicroservice] = useState(false)
+  const [socialShareMessage, setSocialShareMessage] = useState(null)
+  const [copiedLink, setCopiedLink] = useState(false)
+
   // 初始化時檢測是否為本地連線
   useEffect(() => {
     fetch('/api/connection-check')
@@ -179,6 +185,7 @@ function App() {
       if (res.ok) {
         // 成功發佈時，儲存訊息與直達連結
         setPublishMessage({ success: true, text: data.message, url: data.url })
+        setShowShareModal(true) // 顯示限動分享卡片面板！
       } else {
         setPublishMessage({ success: false, text: data.error || '發佈失敗' })
       }
@@ -211,6 +218,236 @@ function App() {
     link.href = URL.createObjectURL(blob)
     link.download = `podcast-notes-${videoId}.md`
     link.click()
+  }
+
+  // 繪製圓角矩形 (輔助 Canvas 繪製卡片邊框)
+  const drawRoundRect = (ctx, x, y, width, height, radius) => {
+    ctx.beginPath()
+    ctx.moveTo(x + radius, y)
+    ctx.lineTo(x + width - radius, y)
+    ctx.quadraticCurveTo(x + width, y, x + width, y + radius)
+    ctx.lineTo(x + width, y + height - radius)
+    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height)
+    ctx.lineTo(x + radius, y + height)
+    ctx.quadraticCurveTo(x, y + height, x, y + height - radius)
+    ctx.lineTo(x, y + radius)
+    ctx.quadraticCurveTo(x, y, x + radius, y)
+    ctx.closePath()
+  }
+
+  // 文字自動折行 (輔助 Canvas 繪製標題)
+  const drawWrapText = (ctx, text, x, y, maxWidth, lineHeight) => {
+    const words = text.split('')
+    let line = ''
+    let currentY = y
+    const maxLines = 4
+    let lineCount = 0
+
+    for (let n = 0; n < words.length; n++) {
+      let testLine = line + words[n]
+      let metrics = ctx.measureText(testLine)
+      let testWidth = metrics.width
+      if (testWidth > maxWidth && n > 0) {
+        ctx.fillText(line, x, currentY)
+        line = words[n]
+        currentY += lineHeight
+        lineCount++
+        if (lineCount >= maxLines - 1) {
+          ctx.fillText(line + '...', x, currentY)
+          return
+        }
+      } else {
+        line = testLine
+      }
+    }
+    ctx.fillText(line, x, currentY)
+  }
+
+  // 渲染限動分享卡片並觸發瀏覽器下載
+  const handleDownloadImage = () => {
+    if (!publishMessage?.url) return
+
+    const canvas = document.createElement('canvas')
+    canvas.width = 1080
+    canvas.height = 1920
+    const ctx = canvas.getContext('2d')
+
+    // 1. 繪製漸層背景
+    const grad = ctx.createLinearGradient(0, 0, 0, 1920)
+    grad.addColorStop(0, '#0a0a0a')
+    grad.addColorStop(1, '#181818')
+    ctx.fillStyle = grad
+    ctx.fillRect(0, 0, 1080, 1920)
+
+    // 2. 繪製裝飾圓形發光
+    ctx.fillStyle = 'rgba(29, 185, 84, 0.15)' // Spotify 綠發光
+    ctx.beginPath()
+    ctx.arc(540, 200, 400, 0, Math.PI * 2)
+    ctx.fill()
+
+    // 3. 繪製玻璃感主卡片容器
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.04)'
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)'
+    ctx.lineWidth = 4
+    drawRoundRect(ctx, 90, 250, 900, 1420, 40)
+    ctx.fill()
+    ctx.stroke()
+
+    // 4. 繪製頂部 Emoji 指示器
+    ctx.fillStyle = '#1DB954'
+    ctx.font = 'bold 70px system-ui, -apple-system, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText('🎙️', 540, 390)
+
+    // 5. 繪製標題 (支援多行文字折行)
+    ctx.fillStyle = '#FFFFFF'
+    ctx.font = 'bold 46px system-ui, -apple-system, sans-serif'
+    drawWrapText(ctx, publishTitle || videoTitle || 'Podcast 翻譯筆記', 540, 485, 720, 68)
+
+    // 6. 繪製中間裝飾分隔線
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(180, 780)
+    ctx.lineTo(900, 780)
+    ctx.stroke()
+
+    // 7. 繪製主題背景字樣
+    ctx.fillStyle = '#1DB954'
+    ctx.font = 'bold 34px system-ui, -apple-system, sans-serif'
+    ctx.fillText('Salsa & Bachata Social Dancing', 540, 850)
+
+    // 8. 載入並繪製 QR Code (使用 api.qrserver.com 生成，啟用跨域標記防止 canvas 被污損)
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(publishMessage.url)}`
+    const qrImage = new Image()
+    qrImage.crossOrigin = 'anonymous'
+    qrImage.onload = () => {
+      ctx.drawImage(qrImage, 380, 930, 320, 320)
+
+      // 9. 繪製底部指引文字
+      ctx.fillStyle = '#a7a7a7'
+      ctx.font = '34px system-ui, -apple-system, sans-serif'
+      ctx.fillText('長按或截圖掃碼，閱讀中英雙語對照筆記', 540, 1320)
+
+      ctx.fillStyle = '#1DB954'
+      ctx.font = 'bold 38px system-ui, -apple-system, sans-serif'
+      ctx.fillText('SCAN TO READ', 540, 1395)
+
+      // 10. 將 Canvas 導出並下載
+      const link = document.createElement('a')
+      link.download = `podcast-share-${videoId}.png`
+      link.href = canvas.toDataURL('image/png')
+      link.click()
+    }
+    qrImage.src = qrUrl
+  }
+
+  // 渲染卡片並同步發送至社交發佈微服務 (social-post-service)
+  const handleShareToMicroservice = async () => {
+    if (!publishMessage?.url || !videoId) return
+
+    setSharingToMicroservice(true)
+    setSocialShareMessage(null)
+
+    // 1. 建立 Canvas
+    const canvas = document.createElement('canvas')
+    canvas.width = 1080
+    canvas.height = 1920
+    const ctx = canvas.getContext('2d')
+
+    // 2. 繪製背景與卡片
+    const grad = ctx.createLinearGradient(0, 0, 0, 1920)
+    grad.addColorStop(0, '#0a0a0a')
+    grad.addColorStop(1, '#181818')
+    ctx.fillStyle = grad
+    ctx.fillRect(0, 0, 1080, 1920)
+
+    ctx.fillStyle = 'rgba(29, 185, 84, 0.15)'
+    ctx.beginPath()
+    ctx.arc(540, 200, 400, 0, Math.PI * 2)
+    ctx.fill()
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.04)'
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)'
+    ctx.lineWidth = 4
+    drawRoundRect(ctx, 90, 250, 900, 1420, 40)
+    ctx.fill()
+    ctx.stroke()
+
+    ctx.fillStyle = '#1DB954'
+    ctx.font = 'bold 70px system-ui, -apple-system, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.fillText('🎙️', 540, 390)
+
+    ctx.fillStyle = '#FFFFFF'
+    ctx.font = 'bold 46px system-ui, -apple-system, sans-serif'
+    drawWrapText(ctx, publishTitle || videoTitle || 'Podcast 翻譯筆記', 540, 485, 720, 68)
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(180, 780)
+    ctx.lineTo(900, 780)
+    ctx.stroke()
+
+    ctx.fillStyle = '#1DB954'
+    ctx.font = 'bold 34px system-ui, -apple-system, sans-serif'
+    ctx.fillText('Salsa & Bachata Social Dancing', 540, 850)
+
+    // 3. 載入並繪製 QR 碼，完成後再打 API (非同步機制)
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(publishMessage.url)}`
+    const qrImage = new Image()
+    qrImage.crossOrigin = 'anonymous'
+    qrImage.onload = async () => {
+      ctx.drawImage(qrImage, 380, 930, 320, 320)
+
+      ctx.fillStyle = '#a7a7a7'
+      ctx.font = '34px system-ui, -apple-system, sans-serif'
+      ctx.fillText('長按或截圖掃碼，閱讀中英雙語對照筆記', 540, 1320)
+
+      ctx.fillStyle = '#1DB954'
+      ctx.font = 'bold 38px system-ui, -apple-system, sans-serif'
+      ctx.fillText('SCAN TO READ', 540, 1395)
+
+      const base64Image = canvas.toDataURL('image/png')
+
+      try {
+        const res = await fetch('/api/social/publish', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: publishTitle,
+            url: publishMessage.url,
+            image: base64Image
+          })
+        })
+
+        const data = await res.json()
+        if (res.ok) {
+          setSocialShareMessage({
+            success: true,
+            text: data.mocked 
+              ? '💡 成功！(本地社交發佈微服務未開啟，已自動進行 Mock 模擬發佈)' 
+              : `✅ 成功！已排入發佈微服務隊列 (Job ID: ${data.jobId})`
+          })
+        } else {
+          setSocialShareMessage({ success: false, text: data.error || '微服務發佈失敗' })
+        }
+      } catch (err) {
+        setSocialShareMessage({ success: false, text: '連線發佈微服務失敗' })
+      } finally {
+        setSharingToMicroservice(false)
+      }
+    }
+    qrImage.src = qrUrl
+  }
+
+  // 複製網址到剪貼簿的輔助函數
+  const handleCopyLink = () => {
+    if (!publishMessage?.url) return
+    navigator.clipboard.writeText(publishMessage.url)
+    setCopiedLink(true)
+    setTimeout(() => setCopiedLink(false), 2000)
   }
 
   return (
@@ -554,6 +791,107 @@ function App() {
 
           </div>
         )}
+      {/* 🚀 IG 限動卡片與微服務分享彈窗 */}
+      {showShareModal && publishMessage?.success && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[100] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-spotify-card border border-white/10 rounded-3xl max-w-md w-full p-6 shadow-2xl relative flex flex-col gap-6 my-8 animate-fade-in text-center">
+            
+            {/* 關閉按鈕 */}
+            <button
+              onClick={() => {
+                setShowShareModal(false)
+                setSocialShareMessage(null)
+              }}
+              className="absolute top-4 right-4 text-white/40 hover:text-white bg-white/5 hover:bg-white/10 p-1.5 rounded-full transition-all text-sm font-semibold"
+            >
+              ✕
+            </button>
+
+            <div>
+              <h3 className="text-xl font-bold text-white flex items-center justify-center gap-2">
+                <Sparkles className="text-spotify-green animate-pulse" size={20} />
+                <span>發佈成功！產生成果卡片</span>
+              </h3>
+              <p className="text-xs text-spotify-text mt-1">
+                下方為您的專屬 IG Story 9:16 分享美圖與掃描二維碼
+              </p>
+            </div>
+
+            {/* 卡片預覽 (9:16) */}
+            <div className="aspect-[9/16] w-full max-w-[250px] mx-auto bg-gradient-to-b from-[#0a0a0a] to-[#181818] rounded-2xl border border-white/10 p-4 relative flex flex-col justify-between shadow-2xl overflow-hidden text-center shrink-0 select-none">
+              {/* 發光裝飾背景 */}
+              <div className="absolute top-[-50px] left-[-50px] w-64 h-64 bg-spotify-green/10 rounded-full filter blur-3xl pointer-events-none"></div>
+              
+              <div className="border border-white/5 bg-white/[0.03] rounded-xl p-3.5 flex-1 flex flex-col justify-between items-center text-center">
+                <div className="text-2xl mt-1">🎙️</div>
+                <div className="text-xs font-bold line-clamp-4 leading-normal my-2 px-1 text-white/95">
+                  {publishTitle || videoTitle || 'Podcast 翻譯筆記'}
+                </div>
+                <div className="w-12 border-t border-white/10 my-1"></div>
+                <div className="text-[9px] text-spotify-green font-bold tracking-wider uppercase">
+                  Salsa & Bachata Dance
+                </div>
+                
+                {/* 二維碼圖片 */}
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(publishMessage.url)}`}
+                  alt="QR Code"
+                  className="w-24 h-24 bg-white p-1 rounded-lg shadow-md my-2"
+                />
+                
+                <div className="text-[8px] text-white/40 leading-snug">
+                  長按或截圖掃碼，閱讀中英雙語對照筆記
+                </div>
+                <div className="text-[8px] text-spotify-green font-bold mt-1 tracking-widest">
+                  SCAN TO READ
+                </div>
+              </div>
+            </div>
+
+            {/* 控制按鈕組 */}
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={handleCopyLink}
+                className="w-full bg-white/10 hover:bg-white/15 text-white font-semibold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all border border-white/5 text-sm"
+              >
+                <span>{copiedLink ? '✓ 已複製連結！' : '🔗 複製文章連結'}</span>
+              </button>
+              
+              <button
+                onClick={handleDownloadImage}
+                className="w-full bg-spotify-green hover:bg-spotify-green/90 text-black font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all text-sm"
+              >
+                <span>📥 下載限動分享美圖 (PNG)</span>
+              </button>
+
+              <button
+                onClick={handleShareToMicroservice}
+                disabled={sharingToMicroservice}
+                className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all text-sm disabled:opacity-50"
+              >
+                {sharingToMicroservice ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                    <span>傳送中...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={16} />
+                    <span>🚀 遞交至發佈微服務</span>
+                  </>
+                )}
+              </button>
+
+              {socialShareMessage && (
+                <div className={`p-3 rounded-xl text-xs border text-left leading-relaxed ${socialShareMessage.success ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-400' : 'bg-red-950/40 border-red-500/30 text-red-400'}`}>
+                  {socialShareMessage.text}
+                </div>
+              )}
+            </div>
+
+          </div>
+        </div>
+      )}
       </main>
     </div>
   )
