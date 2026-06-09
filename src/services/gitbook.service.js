@@ -107,7 +107,7 @@ async function publishToGitBookCore({ videoId, summary, translatedParagraphs, ti
   let mdContent = `${SIGNATURE_MARKER}\n`;
   mdContent += `# 🎙️ ${title}\n\n`;
   mdContent += `> 影片連結: [YouTube 網頁連結 (新分頁開啟)](${youtubeWatchUrl})\n\n`;
-  mdContent += `### 影片嵌入觀看 (可邊放邊對照)\n`;
+  mdContent += `### 影片嵌入觀看 (可邊放邊對照)\n\n`;
   mdContent += `{% embed url="${youtubeWatchUrl}" %}\n\n`;
   
   if (summary) {

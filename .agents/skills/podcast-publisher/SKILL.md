@@ -45,8 +45,10 @@ description: >-
 
 發佈的文章必須具備以下結構：
 1. **頂部影片嵌入**：
-   使用 GitBook 官方支援的 embed 語法：
+   使用 GitBook 官方支援的 embed 語法，**注意：標題與 embed 標籤之間必須留有空行**：
    ```markdown
+   ### 影片嵌入觀看 (可邊放邊對照)
+   
    {% embed url="https://www.youtube.com/watch?v=VIDEO_ID" %}
    ```
 2. **特別版權宣告 (Zouk Nerds Podcast 專用)**：

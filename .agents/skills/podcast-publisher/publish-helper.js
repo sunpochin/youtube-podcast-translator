@@ -112,7 +112,7 @@ async function main() {
       let md = `${SIGNATURE_MARKER}\n`;
       md += `# 🎙️ ${title}\n\n`;
       md += `> 影片連結: [YouTube 網頁連結 (新分頁開啟)](${youtubeWatchUrl})\n\n`;
-      md += `### 影片嵌入觀看 (可邊放邊對照)\n`;
+      md += `### 影片嵌入觀看 (可邊放邊對照)\n\n`;
       md += `{% embed url="${youtubeWatchUrl}" %}\n\n`;
 
       if (isZoukNerds) {
