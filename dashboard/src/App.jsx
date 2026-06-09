@@ -18,6 +18,7 @@ function App() {
   const [transcript, setTranscript] = useState([])
   const [summary, setSummary] = useState('')
   const [translatedParagraphs, setTranslatedParagraphs] = useState([])
+  const [translationProgress, setTranslationProgress] = useState(0) // 翻譯進度百分比
   
   const [isTranslating, setIsTranslating] = useState(false)
   const [activeTab, setActiveTab] = useState('full') // 'full' | 'summary'
@@ -51,6 +52,7 @@ function App() {
     setTranscript([])
     setSummary('')
     setTranslatedParagraphs([])
+    setTranslationProgress(0) // 重設進度
     setPublishTitle('')
     setPublishMessage(null)
     
@@ -74,13 +76,16 @@ function App() {
     }
   }
 
-  // 2. 呼叫 Gemini 進行中英翻譯與大綱生成
+  // 2. 呼叫 Gemini 進行中英翻譯與大綱生成 (透過 SSE 串流)
   const handleTranslate = async () => {
     if (transcript.length === 0 || !videoId) return
     
     setIsTranslating(true)
     setError(null)
     setPublishMessage(null)
+    setTranslationProgress(0)
+    setTranslatedParagraphs([])
+    setSummary('')
     
     try {
       const res = await fetch('/api/translate', {
@@ -90,21 +95,55 @@ function App() {
           transcript, 
           videoId,
           password,
-          mode: translationMode 
+          mode: translationMode
         })
       })
-      const data = await res.json()
-      if (res.ok) {
-        setSummary(data.summary)
-        setTranslatedParagraphs(data.translatedParagraphs)
-        // 預設將影片標題設為預設值
-        setPublishTitle(`Podcast 翻譯 - 影片 ${videoId}`)
-        setActiveTab('summary') // 翻譯完成後，切換到大綱頁籤展示精華
-      } else {
-        setError(data.error || '翻譯失敗')
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}))
+        throw new Error(errorData.error || '翻譯請求失敗')
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder('utf-8')
+      let buffer = ''
+      let receivedParagraphs = []
+
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          const cleanedLine = line.trim()
+          if (cleanedLine.startsWith('data: ')) {
+            try {
+              const packet = JSON.parse(cleanedLine.substring(6))
+              if (packet.type === 'chunk') {
+                receivedParagraphs = [...receivedParagraphs, packet.chunk]
+                setTranslatedParagraphs(receivedParagraphs)
+                setTranslationProgress(packet.progress)
+              } else if (packet.type === 'summary') {
+                setSummary(packet.summary)
+              } else if (packet.type === 'error') {
+                throw new Error(packet.error || '翻譯中途發生錯誤')
+              } else if (packet.type === 'done') {
+                setPublishTitle(`Podcast 翻譯 - 影片 ${videoId}`)
+                setActiveTab('summary')
+              }
+            } catch (jsonErr) {
+              console.error('解析串流資料失敗:', jsonErr)
+              setError(jsonErr.message || '解析串流時發生錯誤')
+            }
+          }
+        }
       }
     } catch (err) {
-      setError('AI 翻譯連線中斷，請重試')
+      console.error('翻譯失敗:', err)
+      setError(err.message || 'AI 翻譯連線中斷，請重試')
     } finally {
       setIsTranslating(false)
     }
@@ -302,24 +341,40 @@ function App() {
                   </div>
 
                   <div className="mt-6 pt-4 border-t border-white/5">
-                    {translatedParagraphs.length === 0 ? (
-                      <button
-                        onClick={handleTranslate}
-                        disabled={isTranslating}
-                        className="w-full bg-gradient-to-r from-spotify-green to-emerald-500 hover:from-spotify-green/90 hover:to-emerald-500/90 text-black font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg"
-                      >
-                        {isTranslating ? (
-                          <>
-                            <div className="animate-spin rounded-full h-5 w-5 border-2 border-black border-t-transparent"></div>
-                            <span>AI 雙語對照翻譯中...</span>
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles size={18} />
-                            <span>啟動 AI 雙語翻譯</span>
-                          </>
+                    {translatedParagraphs.length === 0 || isTranslating ? (
+                      <div className="flex flex-col gap-3">
+                        {isTranslating && (
+                          <div className="w-full text-left">
+                            <div className="flex justify-between text-xs text-spotify-text mb-1.5">
+                              <span>翻譯進度</span>
+                              <span>{translationProgress}%</span>
+                            </div>
+                            <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden">
+                              <div 
+                                className="bg-spotify-green h-full transition-all duration-300"
+                                style={{ width: `${translationProgress}%` }}
+                              ></div>
+                            </div>
+                          </div>
                         )}
-                      </button>
+                        <button
+                          onClick={handleTranslate}
+                          disabled={isTranslating}
+                          className="w-full bg-gradient-to-r from-spotify-green to-emerald-500 hover:from-spotify-green/90 hover:to-emerald-500/90 text-black font-bold py-3.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-lg disabled:opacity-50"
+                        >
+                          {isTranslating ? (
+                            <>
+                              <div className="animate-spin rounded-full h-5 w-5 border-2 border-black border-t-transparent"></div>
+                              <span>AI 雙語對照翻譯中... ({translationProgress}%)</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles size={18} />
+                              <span>啟動 AI 雙語翻譯</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                      ) : (
                       <div className="flex flex-col gap-3">
                         <div className="flex items-center gap-2 text-spotify-green text-sm">

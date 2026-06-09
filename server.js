@@ -66,14 +66,14 @@ function verifyGitBookPassword(req, res, next) {
 let ollamaQueuePromise = Promise.resolve();
 async function enqueueOllamaTask(taskFn) {
   const nextTask = ollamaQueuePromise.then(() => taskFn());
+  ollamaQueuePromise = nextTask.catch(() => {}); // 確保即使失敗也能繼續執行下一個
+  return nextTask;
+}
 
 // API：檢測連線是否為本地開發環境
 app.get('/api/connection-check', (req, res) => {
   res.json({ isLocal: isLocalRequest(req) });
 });
-  ollamaQueuePromise = nextTask.catch(() => {}); // 確保即使失敗也能繼續執行下一個
-  return nextTask;
-}
 
 // 初始化 Gemini 客户端，优先使用系统提供的 GEMINI_API_KEY
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -201,25 +201,34 @@ Podcast 內容：
   }
 }
 
-// 2. 呼叫 Gemini 2.5 Flash 或 Ollama 進行中英翻譯與分段摘要的 API
+// 2. 呼叫 Gemini 2.5 Flash 或 Ollama 進行中英翻譯與分段摘要的 API (採用 SSE 串流傳輸)
 app.post('/api/translate', async (req, res) => {
   const { transcript, videoId, mode, password } = req.body;
   if (!transcript || !Array.isArray(transcript)) {
     return res.status(400).json({ error: '無效的字幕資料' });
   }
 
-  // 預設使用 Ollama 模式 (免費)，可傳入 'gemini' 參數以切換
   const isGeminiMode = mode === 'gemini';
 
-  // 外部 IP 如果想要切換成 Gemini 模式，強制校驗密碼保護錢包
   if (isGeminiMode && !isLocalRequest(req)) {
     if (!password || password !== ACCESS_PASSWORD) {
       return res.status(401).json({ error: '訪問密碼無效，外部用戶無法直接呼叫雲端付費 Gemini 引擎！' });
     }
   }
 
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
+  });
+
+  let connectionClosed = false;
+  req.on('close', () => {
+    connectionClosed = true;
+    console.log(`[連線中斷] 用戶關閉了連線，終止翻譯任務`);
+  });
+
   try {
-    // 為了降低 API 呼叫次數並節省 Token，我們將字幕段落進行分塊 (每 35 句合併為一個段落)
     const chunks = [];
     let currentChunk = [];
     
@@ -231,8 +240,15 @@ app.post('/api/translate', async (req, res) => {
       }
     });
 
-    // 對每個 Chunk 進行非同步翻譯
-    const translatePromises = chunks.map(async (chunk, chunkIndex) => {
+    console.log(`[開始翻譯] 影片 ID: ${videoId}, 模式: ${mode}, 總分段數: ${chunks.length}`);
+
+    const results = [];
+    
+    for (let i = 0; i < chunks.length; i++) {
+      if (connectionClosed) break;
+
+      console.log(`[進行中] 翻譯分段 ${i + 1}/${chunks.length}...`);
+      const chunk = chunks[i];
       const startTime = chunk[0].start;
       const endTime = chunk[chunk.length - 1].start + chunk[chunk.length - 1].duration;
       const englishText = chunk.map(c => c.text).join(' ');
@@ -240,7 +256,6 @@ app.post('/api/translate', async (req, res) => {
       let chineseText = '';
 
       if (isGeminiMode) {
-        // 1. 使用 Gemini API 雲端翻譯
         const prompt = `
 您是一位專業的同聲傳譯與 Podcast 導讀專家。請將以下這段 Podcast 的英文字幕段落進行精確、流暢的繁體中文（台灣習慣用語）翻譯。
 
@@ -259,38 +274,37 @@ app.post('/api/translate', async (req, res) => {
         });
         chineseText = response.text ? response.text.trim() : '（翻譯失敗）';
       } else {
-        // 2. 預設：使用本地 Mac Mini Ollama (使用 Queue 佇列排隊保護)
         try {
           chineseText = await enqueueOllamaTask(() => translateWithOllama(englishText, 'qwen2.5:14b'));
         } catch (ollamaErr) {
-          // Ollama 連接錯誤或缺少 14b，退化使用 7b 嘗試
           try {
             chineseText = await enqueueOllamaTask(() => translateWithOllama(englishText, 'qwen2.5:7b'));
           } catch (errInner) {
-            // 完全無法使用 Ollama 時，拋出詳細指引
             throw new Error('本地 Ollama 服務未開啟，請在 Mac Mini 終端機執行 `ollama run qwen2.5:14b`，或切換為雲端 Gemini 模式。');
           }
         }
       }
 
-      return {
-        chunkIndex,
+      const resultItem = {
+        chunkIndex: i,
         start: startTime,
         end: endTime,
         english: englishText,
         chinese: chineseText
       };
-    });
+      results.push(resultItem);
 
-    const results = await Promise.all(translatePromises);
-    results.sort((a, b) => a.chunkIndex - b.chunkIndex);
+      const progress = Math.round(((i + 1) / chunks.length) * 100);
+      res.write(`data: ${JSON.stringify({ type: 'chunk', chunk: resultItem, progress })}\n\n`);
+    }
 
-    // 額外生成一份整集的大綱與精華導讀
-    const fullEnglishText = results.map(r => r.english).slice(0, 8).join(' ');
-    let summaryText = '';
+    if (!connectionClosed) {
+      console.log(`[進行中] 生成整集大綱摘要中...`);
+      const fullEnglishText = results.map(r => r.english).slice(0, 8).join(' ');
+      let summaryText = '';
 
-    if (isGeminiMode) {
-      const summaryPrompt = `
+      if (isGeminiMode) {
+        const summaryPrompt = `
 請閱讀以下 Podcast 前段內容，並以繁體中文整理出：
 1. 這一集 Podcast 的核心主旨與探討內容。
 2. 列出 3-4 個本集最值得關注的關鍵看點與精華摘要。
@@ -298,32 +312,34 @@ app.post('/api/translate', async (req, res) => {
 Podcast 內容：
 "${fullEnglishText}"
 `;
-      const summaryResponse = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: summaryPrompt,
-      });
-      summaryText = summaryResponse.text ? summaryResponse.text.trim() : '無法生成摘要。';
-    } else {
-      try {
-        summaryText = await enqueueOllamaTask(() => summarizeWithOllama(fullEnglishText, 'qwen2.5:14b'));
-      } catch (ollamaErr) {
+        const summaryResponse = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: summaryPrompt,
+        });
+        summaryText = summaryResponse.text ? summaryResponse.text.trim() : '無法生成摘要。';
+      } else {
         try {
-          summaryText = await enqueueOllamaTask(() => summarizeWithOllama(fullEnglishText, 'qwen2.5:7b'));
-        } catch (err) {
-          summaryText = '本地大腦摘要生成失敗，請檢查 Ollama 運作狀態。';
+          summaryText = await enqueueOllamaTask(() => summarizeWithOllama(fullEnglishText, 'qwen2.5:14b'));
+        } catch (ollamaErr) {
+          try {
+            summaryText = await enqueueOllamaTask(() => summarizeWithOllama(fullEnglishText, 'qwen2.5:7b'));
+          } catch (err) {
+            summaryText = '本地大腦摘要生成失敗，請檢查 Ollama 運作狀態。';
+          }
         }
       }
+
+      res.write(`data: ${JSON.stringify({ type: 'summary', summary: summaryText })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+      console.log(`[成功完成] Video ID: ${videoId} 翻譯完成`);
     }
 
-    res.json({
-      videoId,
-      summary: summaryText,
-      translatedParagraphs: results
-    });
+    res.end();
 
   } catch (err) {
     console.error('AI 翻譯失敗:', err);
-    res.status(500).json({ error: `AI 翻譯過程發生錯誤：${err.message}` });
+    res.write(`data: ${JSON.stringify({ type: 'error', error: err.message || '翻譯過程中發生未知錯誤' })}\n\n`);
+    res.end();
   }
 });
 
