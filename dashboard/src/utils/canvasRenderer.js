@@ -56,6 +56,54 @@ function drawWrapText(ctx, text, x, y, maxWidth, lineHeight) {
  * @param {string} publishUrl - GitBook 發佈後的對照閱讀網址
  * @returns {Promise<string>} - Promise 解析為 base64 圖片資料
  */
+/**
+ * 繪製 QR Code 離線或超時的降級佔位圖
+ */
+function drawFallbackPlaceholder(ctx, canvas, resolve, reject, isTimeout = false) {
+  // 離線降級處理：當外部 QR Code 服務不可用時，繪製精美的替代佔位圖，而非中斷流程
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.06)'
+  ctx.strokeStyle = 'rgba(29, 185, 84, 0.4)'
+  ctx.lineWidth = 4
+  drawRoundRect(ctx, 380, 930, 320, 320, 24)
+  ctx.fill()
+  ctx.stroke()
+
+  // 繪製連結與警告 Emoji
+  ctx.fillStyle = '#1DB954'
+  ctx.font = 'bold 70px system-ui, -apple-system, sans-serif'
+  ctx.fillText('🔗', 540, 1070)
+
+  ctx.fillStyle = '#a7a7a7'
+  ctx.font = 'bold 24px system-ui, -apple-system, sans-serif'
+  ctx.fillText('掃描連結閱讀', 540, 1145)
+
+  ctx.fillStyle = '#888888'
+  ctx.font = '18px system-ui, -apple-system, sans-serif'
+  ctx.fillText(isTimeout ? '(QR 載入逾時)' : '(QR 服務離線)', 540, 1185)
+
+  // 仍繪製底部提示文字，確保排版完整
+  ctx.fillStyle = '#a7a7a7'
+  ctx.font = '34px system-ui, -apple-system, sans-serif'
+  ctx.fillText('長按或截圖掃碼，閱讀中英雙語對照筆記', 540, 1320)
+
+  ctx.fillStyle = '#1DB954'
+  ctx.font = 'bold 38px system-ui, -apple-system, sans-serif'
+  ctx.fillText('SCAN TO READ', 540, 1395)
+
+  try {
+    const base64Data = canvas.toDataURL('image/png')
+    resolve(base64Data)
+  } catch (err) {
+    reject(new Error(`導出失敗 (Tainted Canvas)：${err.message}`))
+  }
+}
+
+/**
+ * 渲染分享圖卡並回傳 base64 PNG 資料
+ * @param {string} title - 影片/文章標題
+ * @param {string} publishUrl - GitBook 發佈後的對照閱讀網址
+ * @returns {Promise<string>} - Promise 解析為 base64 圖片資料
+ */
 export async function generateShareCard(title, publishUrl) {
   return new Promise((resolve, reject) => {
     // 建立背景畫布
@@ -113,7 +161,18 @@ export async function generateShareCard(title, publishUrl) {
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(publishUrl)}`
     const qrImage = new Image()
     qrImage.crossOrigin = 'anonymous'
+
+    // 設定 8 秒超時，防止 QR Code 生成服務掛起時讓 Promise 永久掛起
+    const timeoutId = setTimeout(() => {
+      qrImage.onload = null
+      qrImage.onerror = null
+      console.warn('[Canvas] QR Code 載入逾時，啟動降級佔位圖機制。')
+      drawFallbackPlaceholder(ctx, canvas, resolve, reject, true)
+    }, 8000)
+
     qrImage.onload = () => {
+      clearTimeout(timeoutId)
+      // 繪製成功載入的 QR Code
       ctx.drawImage(qrImage, 380, 930, 320, 320)
 
       // 繪製底部提示文字
@@ -134,7 +193,9 @@ export async function generateShareCard(title, publishUrl) {
       }
     }
     qrImage.onerror = () => {
-      reject(new Error('無法載入 QR Code 生成服務的圖片'))
+      clearTimeout(timeoutId)
+      console.warn('[Canvas] QR Code 載入錯誤，啟動降級佔位圖機制。')
+      drawFallbackPlaceholder(ctx, canvas, resolve, reject, false)
     }
     qrImage.src = qrUrl
   })

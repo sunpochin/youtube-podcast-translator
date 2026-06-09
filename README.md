@@ -53,18 +53,19 @@
                                      (MockStrategy / SDK)   Pending -> Completed
 ```
 
-### 💎 微服務核心設計優勢與面試高光點：
+### 💎 微服務整合設計與面試亮點：
 
 1. **關注點分離 (Separation of Concerns)**：
-   * **主服務 (youtube-podcast-translator)**：專注於 CPU/IO 密集的音訊抓取、串流翻譯、GitBook GitOps 同步與 Canvas 視覺合成。
-   * **微服務 (social-post-service)**：專注於異步隊列管理、Meta Graph API 速率限制 (Rate Limit) 規避、失敗重試機制與多平台社群（Instagram, Threads）分發。
+   * **主服務 (youtube-podcast-translator)**：專注於 CPU/IO 密集的音訊抓取、串流翻譯、GitBook 同步與 Canvas 視覺合成。
+   * **微服務 (social-post-service)**：專注於非同步發文任務的佇列管理與多平台社群（如 Instagram）發佈邏輯的解耦。
 
-2. **非同步削峰與響應延遲優化 (Decoupled Job Queue)**：
-   * 由於發佈至社交平台需要進行圖片上傳、網址校驗與 API 握手，整個過程通常耗時數秒至數十秒。
-   * 主服務向微服務發起請求時，微服務**立刻回傳 `202 Accepted` 與隨機生成之 `jobId`**。主服務前端介面可以立即對使用者顯示「已排入發佈隊列」，避免執行緒被高延遲的外部請求阻塞，提升系統吞吐量與 UX 流暢度。
+2. **非同步任務與輪詢模式 (Async Polling Pattern)**：
+   * 社交平台發佈涉及高延遲的圖片上傳與 API 互動，主服務後端代理轉發時，微服務**立刻回傳 `202 Accepted` 與 `jobId`**。
+   * 主服務前端取得 `jobId` 後，自動啟動**狀態輪詢器 (Polling)**（每 1.5 秒請求 `/api/social/status/:jobId`），動態追蹤任務狀態（`queued` -> `posting` -> `completed`/`failed`），提供極佳的非同步狀態追蹤體驗。
 
-3. **強固的退化方案 (Graceful Degradation & Timeout)**：
-   * 主服務後端採用 `AbortSignal.timeout(5000)` 來保護代理連線。若微服務因意外離線、重啟或崩潰而未在 5 秒內回應，主服務會**自動捕獲異常並降級至 Mock 發佈模式**，回傳 `mocked: true` 給前端。這體現了分佈式系統中「即使下游服務崩潰，核心業務亦不能中斷」的彈性設計方針。
+3. **明確的錯誤語意與 Demo 模式 (Error Semantics & Demo Mode Toggle)**：
+   * 系統拒絕將真正的連線失敗偽裝成成功。當切換為**實體微服務 (Live)** 模式時，若微服務斷線，系統將明確回傳 `503 Service Unavailable` 並引導使用者檢查微服務狀態。
+   * 為了方便 Demo 展示，系統提供**模擬展示 (Demo Mock)** 模式，在微服務未開啟的情況下，仍能透過主服務記憶體完整模擬非同步佇列的狀態移轉與輪詢。
 
 ---
 
@@ -130,7 +131,22 @@
 
 *   **前端**：Vite + React 19 + Tailwind CSS + Lucide React 圖標。
     *   **`/dashboard`** 目錄：包含響應式雙欄閱讀器、影片 Embedded 預覽、Markdown 筆記一鍵匯出，以及 **9:16 IG Story 卡片渲染器（自動生成指向 GitBook 網址的跨域安全 QR Code，並支持一鍵下載美圖與遞交微服務）**。
-*   **後端**：Express + `youtube-transcript` (秒級抓取英文字幕) + `@google/genai` (調用免費的 Gemini 2.5 Flash) / 本地 Ollama (預設 Qwen 2.5 14b) + `social-post-service` 代理發佈路由。
+*   **後端**：Express + `youtube-transcript` (秒級抓取英文字幕) + `@google/genai` (調用免費的 Gemini 2.5 Flash) / 本地 Ollama (預設快速模型：翻譯 `qwen2.5:7b`、摘要與 Slug `qwen3:4b`) + `social-post-service` 代理發佈路由。
+
+### 本地 Ollama 模型調校
+
+本地模式已改成以速度優先的預設值，避免 `qwen2.5:14b` 在 Mac Mini 上拖慢整段 Podcast 翻譯。可用環境變數依任務調整模型：
+
+```bash
+export OLLAMA_TRANSLATE_MODEL=qwen2.5:7b
+export OLLAMA_TRANSLATE_FALLBACK_MODEL=qwen3:4b
+export OLLAMA_SUMMARY_MODEL=qwen3:4b
+export OLLAMA_SUMMARY_FALLBACK_MODEL=qwen2.5:7b
+export OLLAMA_SLUG_MODEL=qwen3:4b
+export OLLAMA_SLUG_FALLBACK_MODEL=qwen2.5:7b
+```
+
+建議面試 demo 仍優先使用 Gemini 2.5 Flash；本地 Ollama 模式定位為離線、隱私與成本控制路徑。若要追求更快回應，可實測 `gemma3:4b` 或 `gemma3n:e4b`，但繁中翻譯與舞蹈術語品質需要人工抽查。
 
 ---
 

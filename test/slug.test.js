@@ -69,6 +69,8 @@ describe('Express API 路由整合測試', () => {
 
   // 在所有測試開始前 (before) 啟動測試伺服器
   before(() => {
+    // 強制將微服務指向無效連接埠，確保斷線與降級測試的獨立性與穩定性
+    process.env.SOCIAL_POST_SERVICE_URL = 'http://127.0.0.1:59999/api/posts';
     return new Promise((resolve) => {
       // 啟動測試用伺服器並動態分配連接埠 (port: 0)，避免通訊埠衝突
       server = http.createServer(app);
@@ -200,20 +202,46 @@ describe('Express API 路由整合測試', () => {
     assert.ok(data.error.includes('缺少必要分享參數'));
   });
 
-  test('POST /api/social/publish - 連線微服務失敗時應自動降級為模擬成功', async () => {
+  test('POST /api/social/publish - Live 模式在微服務斷線時應明確返回 503', async () => {
     const res = await fetch(`${baseUrl}/api/social/publish`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         title: '測試標題',
         url: 'https://test-gitbook.com/123',
-        image: 'data:image/png;base64,mocked-base64'
+        image: 'data:image/png;base64,mocked-base64',
+        mockMode: false // 指定 Live 模式
       })
     });
-    assert.strictEqual(res.status, 200);
+    // 當微服務沒開時，Live 模式必須傳回 503 服務不可用
+    assert.strictEqual(res.status, 503);
     const data = await res.json();
-    assert.strictEqual(data.success, true);
-    assert.ok(data.jobId || data.mocked, '應包含 jobId (微服務在線) 或 mocked 標記 (微服務離線)');
+    assert.ok(data.error.includes('無法連線至社交發佈微服務'));
+  });
+
+  test('POST & GET /api/social/publish & status - Mock 模式應返回 202 並可正確輪詢狀態', async () => {
+    const publishRes = await fetch(`${baseUrl}/api/social/publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: '測試標題',
+        url: 'https://test-gitbook.com/123',
+        image: 'data:image/png;base64,mocked-base64',
+        mockMode: true // 指定 Mock 模式
+      })
+    });
+
+    assert.strictEqual(publishRes.status, 202);
+    const publishData = await publishRes.json();
+    assert.strictEqual(publishData.success, true);
+    assert.ok(publishData.jobId.startsWith('mock-'));
+
+    // 測試輪詢狀態端點
+    const statusRes = await fetch(`${baseUrl}/api/social/status/${publishData.jobId}`);
+    assert.strictEqual(statusRes.status, 200);
+    const statusData = await statusRes.json();
+    assert.strictEqual(statusData.jobId, publishData.jobId);
+    assert.ok(['queued', 'posting', 'completed'].includes(statusData.status));
   });
 });
 
@@ -263,18 +291,20 @@ describe('AI & GitBook Services 單元測試與 Mock 驗證', () => {
   });
 
   // 測試 3：驗證 Ollama 正常運作時，translateTitleToSlug 的處理結果
-  test('translateTitleToSlug - 當 Ollama 14b 成功時，應直接使用其結果並過濾特殊字元', async (t) => {
-    t.mock.method(globalThis, 'fetch', async () => {
+  test('translateTitleToSlug - 當預設 Ollama slug model 成功時，應直接使用其結果並過濾特殊字元', async (t) => {
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+      const body = JSON.parse(options.body);
+      assert.strictEqual(body.model, 'qwen3:4b');
       return {
         ok: true,
         json: async () => ({
-          message: { content: 'mocked-ollama-14b-slug!' }
+          message: { content: 'mocked-ollama-fast-slug!' }
         })
       };
     });
 
     const result = await translateTitleToSlug('每週一句小劇場', 'video123');
-    assert.strictEqual(result, 'mocked-ollama-14b-slug');
+    assert.strictEqual(result, 'mocked-ollama-fast-slug');
   });
 
   // 測試 4：驗證本地 Ollama 斷線時，系統能自動降級 Mock 呼叫雲端 Gemini 的機制
@@ -350,6 +380,9 @@ describe('AI & GitBook Services 單元測試與 Mock 驗證', () => {
       const fileContent = await fs.readFile(path.join(sandboxDir, 'podcast-translations/test-slug.md'), 'utf-8');
       assert.ok(fileContent.includes('<!-- gitbook-plugin-youtube-podcast-translator-auto-generated -->'));
       assert.ok(fileContent.includes('測試影片標題'));
+      assert.ok(fileContent.includes('> 影片連結: [YouTube 網頁連結 (新分頁開啟)](https://www.youtube.com/watch?v=uSYCduNg1oc)'));
+      assert.ok(fileContent.includes('{% embed url="https://www.youtube.com/watch?v=uSYCduNg1oc" %}'));
+      assert.ok(!fileContent.includes('<iframe'), 'GitBook publish markdown should use official embed syntax instead of raw iframe');
 
       // 驗證 SUMMARY.md 被正確更新 (扁平無縮排格式)
       const summaryContent = await fs.readFile(path.join(sandboxDir, 'SUMMARY.md'), 'utf-8');

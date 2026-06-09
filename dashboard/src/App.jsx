@@ -41,6 +41,8 @@ function App() {
   const [sharingToMicroservice, setSharingToMicroservice] = useState(false)
   const [socialShareMessage, setSocialShareMessage] = useState(null)
   const [copiedLink, setCopiedLink] = useState(false)
+  const [mockMode, setMockMode] = useState(true) // 預設使用模擬模式以利面試展示與 Demo
+  const [pollingStatus, setPollingStatus] = useState(null) // 'queued' | 'posting' | 'completed' | 'failed'
 
   // 初始化時檢測是否為本地連線
   useEffect(() => {
@@ -213,7 +215,9 @@ function App() {
     if (translatedParagraphs.length === 0) return
     
     let content = `# YouTube Podcast 導讀筆記\\n\\n`
-    content += `> 影片網址: https://youtube.com/watch?v=${videoId}\\n\\n`
+    content += `> 影片連結: [YouTube 網頁連結 (新分頁開啟)](https://www.youtube.com/watch?v=${videoId})\\n\\n`
+    content += `### 影片嵌入觀看 (可邊放邊對照)\\n`
+    content += `{% embed url="https://www.youtube.com/watch?v=${videoId}" %}\\n\\n`
     if (summary) {
       content += `## 核心主旨與關鍵看點\\n\\n${summary}\\n\\n`
     }
@@ -286,12 +290,62 @@ function App() {
     }
   }
 
+  // 輪詢微服務發佈任務狀態
+  const startPollingJobStatus = (jobId) => {
+    let attempts = 0
+    setPollingStatus('queued')
+    const interval = setInterval(async () => {
+      attempts++
+      try {
+        const res = await fetch(`/api/social/status/${jobId}`)
+        if (res.ok) {
+          const job = await res.json()
+          setPollingStatus(job.status)
+          
+          if (job.status === 'completed') {
+            clearInterval(interval)
+            setSharingToMicroservice(false)
+            setSocialShareMessage({
+              success: true,
+              text: mockMode
+                ? `🎉 發佈成功！(模擬任務已順利完成)`
+                : `🎉 發佈成功！已發佈至 Instagram (Post ID: ${job.results?.[0]?.platformPostId || 'N/A'})`
+            })
+          } else if (job.status === 'failed') {
+            clearInterval(interval)
+            setSharingToMicroservice(false)
+            setSocialShareMessage({
+              success: false,
+              text: `❌ 發佈失敗: ${job.results?.[0]?.error || '微服務執行錯誤'}`
+            })
+          }
+        } else {
+          // 處理異常狀態碼
+          if (attempts > 12) {
+            clearInterval(interval)
+            setSharingToMicroservice(false)
+            setPollingStatus('failed')
+            setSocialShareMessage({ success: false, text: '⚠️ 查詢任務狀態超時' })
+          }
+        }
+      } catch (err) {
+        if (attempts > 12) {
+          clearInterval(interval)
+          setSharingToMicroservice(false)
+          setPollingStatus('failed')
+          setSocialShareMessage({ success: false, text: '⚠️ 狀態查詢連線失敗' })
+        }
+      }
+    }, 1500)
+  }
+
   // 渲染卡片並同步發送至社交發佈微服務 (social-post-service)
   const handleShareToMicroservice = async () => {
     if (!publishMessage?.url || !videoId) return
 
     setSharingToMicroservice(true)
     setSocialShareMessage(null)
+    setPollingStatus('queued')
 
     try {
       const base64Image = await generateShareCard(
@@ -305,7 +359,8 @@ function App() {
         body: JSON.stringify({
           title: publishTitle || videoTitle || 'Podcast 翻譯筆記',
           url: publishMessage.url,
-          image: base64Image
+          image: base64Image,
+          mockMode
         })
       })
 
@@ -314,25 +369,53 @@ function App() {
         setSocialShareMessage({
           success: true,
           text: data.mocked 
-            ? '💡 成功！(本地社交發佈微服務未開啟，已自動進行 Mock 模擬發佈)' 
-            : `✅ 成功！已排入發佈微服務隊列 (Job ID: ${data.jobId})`
+            ? `💡 已建立模擬任務 (Job ID: ${data.jobId})，正在模擬發佈進度...` 
+            : `✅ 已成功遞交！正在追蹤任務發佈進度 (Job ID: ${data.jobId})...`
         })
+        startPollingJobStatus(data.jobId)
       } else {
         setSocialShareMessage({ success: false, text: data.error || '微服務發佈失敗' })
+        setSharingToMicroservice(false)
+        setPollingStatus(null)
       }
     } catch (err) {
       setSocialShareMessage({ success: false, text: '連線或渲染微服務圖卡失敗' })
-    } finally {
       setSharingToMicroservice(false)
+      setPollingStatus(null)
     }
   }
 
-  // 複製網址到剪貼簿的輔助函數
+  // 複製網址到剪貼簿的輔助函數 (相容非安全/HTTP 上下文)
   const handleCopyLink = () => {
     if (!publishMessage?.url) return
-    navigator.clipboard.writeText(publishMessage.url)
-    setCopiedLink(true)
-    setTimeout(() => setCopiedLink(false), 2000)
+    
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      // 優先使用現代安全 API
+      navigator.clipboard.writeText(publishMessage.url)
+      setCopiedLink(true)
+      setTimeout(() => setCopiedLink(false), 2000)
+    } else {
+      // 降級退化方案：建立臨時 textarea 進行複製
+      const textArea = document.createElement('textarea')
+      textArea.value = publishMessage.url
+      textArea.style.position = 'fixed'
+      textArea.style.left = '-9999px' // 移出可視區
+      document.body.appendChild(textArea)
+      textArea.focus()
+      textArea.select()
+      try {
+        const successful = document.execCommand('copy')
+        if (successful) {
+          setCopiedLink(true)
+          setTimeout(() => setCopiedLink(false), 2000)
+        } else {
+          console.warn('Fallback copy command returned false')
+        }
+      } catch (err) {
+        console.error('Fallback copy failed', err)
+      }
+      document.body.removeChild(textArea)
+    }
   }
 
   return (
@@ -698,6 +781,7 @@ function App() {
               onClick={() => {
                 setShowShareModal(false)
                 setSocialShareMessage(null)
+                setPollingStatus(null)
               }}
               className="absolute top-4 right-4 text-white/40 hover:text-white bg-white/5 hover:bg-white/10 p-1.5 rounded-full transition-all text-sm font-semibold"
             >
@@ -745,6 +829,32 @@ function App() {
               </div>
             </div>
 
+            {/* 微服務整合模式選擇器 */}
+            <div className="bg-white/5 border border-white/10 rounded-xl p-3 flex flex-col gap-2 text-left">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-gray-300">微服務整合模式：</span>
+                <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${mockMode ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
+                  {mockMode ? '模擬展示 (Demo)' : '實體微服務 (Live)'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <button
+                  onClick={() => setMockMode(true)}
+                  disabled={sharingToMicroservice}
+                  className={`py-1.5 px-2 rounded-lg font-medium transition-all ${mockMode ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40' : 'bg-transparent text-gray-400 hover:text-white border border-transparent'}`}
+                >
+                  🎭 模擬展示
+                </button>
+                <button
+                  onClick={() => setMockMode(false)}
+                  disabled={sharingToMicroservice}
+                  className={`py-1.5 px-2 rounded-lg font-medium transition-all ${!mockMode ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' : 'bg-transparent text-gray-400 hover:text-white border border-transparent'}`}
+                >
+                  ⚡ 實體微服務
+                </button>
+              </div>
+            </div>
+
             {/* 控制按鈕組 */}
             <div className="flex flex-col gap-3">
               <button
@@ -766,10 +876,15 @@ function App() {
                 disabled={sharingToMicroservice}
                 className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all text-sm disabled:opacity-50"
               >
-                {sharingToMicroservice ? (
+                {sharingToMicroservice && pollingStatus ? (
                   <>
                     <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                    <span>傳送中...</span>
+                    <span>
+                      {pollingStatus === 'queued' && '排隊中...'}
+                      {pollingStatus === 'posting' && '發佈中...'}
+                      {pollingStatus === 'completed' && '發佈完成'}
+                      {pollingStatus === 'failed' && '發佈失敗'}
+                    </span>
                   </>
                 ) : (
                   <>
@@ -778,6 +893,31 @@ function App() {
                   </>
                 )}
               </button>
+
+              {/* 任務階段追蹤進度條 */}
+              {sharingToMicroservice && pollingStatus && (
+                <div className="bg-white/5 rounded-xl p-3 text-xs text-left border border-white/5 flex flex-col gap-2">
+                  <div className="flex justify-between items-center text-gray-400">
+                    <span>任務階段追蹤：</span>
+                    <span className="text-spotify-green animate-pulse font-mono">
+                      {pollingStatus === 'queued' && '⏳ 排隊中 (queued)'}
+                      {pollingStatus === 'posting' && '📡 發佈中 (posting)'}
+                      {pollingStatus === 'completed' && '✅ 已完成 (completed)'}
+                      {pollingStatus === 'failed' && '❌ 失敗 (failed)'}
+                    </span>
+                  </div>
+                  <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className={`h-full transition-all duration-500 ${
+                        pollingStatus === 'queued' ? 'w-1/3 bg-amber-500' :
+                        pollingStatus === 'posting' ? 'w-2/3 bg-indigo-500' :
+                        pollingStatus === 'completed' ? 'w-full bg-spotify-green' :
+                        'w-full bg-red-500'
+                      }`}
+                    ></div>
+                  </div>
+                </div>
+              )}
 
               {socialShareMessage && (
                 <div className={`p-3 rounded-xl text-xs border text-left leading-relaxed ${socialShareMessage.success ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-400' : 'bg-red-950/40 border-red-500/30 text-red-400'}`}>

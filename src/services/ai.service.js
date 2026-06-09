@@ -7,6 +7,15 @@ import { generateCleanSlugFallback } from '../utils/helpers.js';
 // 初始化 Gemini 智慧客戶端，優先使用 GEMINI_API_KEY
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+export const ollamaModelConfig = {
+  translate: process.env.OLLAMA_TRANSLATE_MODEL || 'qwen2.5:7b',
+  translateFallback: process.env.OLLAMA_TRANSLATE_FALLBACK_MODEL || 'qwen3:4b',
+  summary: process.env.OLLAMA_SUMMARY_MODEL || 'qwen3:4b',
+  summaryFallback: process.env.OLLAMA_SUMMARY_FALLBACK_MODEL || 'qwen2.5:7b',
+  slug: process.env.OLLAMA_SLUG_MODEL || 'qwen3:4b',
+  slugFallback: process.env.OLLAMA_SLUG_FALLBACK_MODEL || 'qwen2.5:7b'
+};
+
 // 全域影片級翻譯排隊調度器 (Video-level Translation Queue Scheduler)
 class TranslationQueueManager {
   constructor() {
@@ -21,7 +30,8 @@ class TranslationQueueManager {
 
     if (!this.running) {
       this.running = job;
-      onStart();
+      // 使用 process.nextTick 延遲執行，確保呼叫端已成功接收並賦值 jobId
+      process.nextTick(() => onStart());
     } else {
       this.queue.push(job);
       const position = this.queue.length;
@@ -37,7 +47,8 @@ class TranslationQueueManager {
       if (this.queue.length > 0) {
         const nextJob = this.queue.shift();
         this.running = nextJob;
-        nextJob.onStart();
+        // 延遲啟動下一個任務，確保事件循環健康
+        process.nextTick(() => nextJob.onStart());
         // 更新其他排隊者的位置與當前正在執行的任務標題
         this.queue.forEach((job, index) => {
           job.onWait(index + 1, this.running.title || this.running.videoId);
@@ -63,7 +74,7 @@ export async function enqueueOllamaTask(taskFn) {
 }
 
 // 呼叫本地 Ollama 進行翻譯
-export async function translateWithOllama(englishText, modelName = 'qwen2.5:14b') {
+export async function translateWithOllama(englishText, modelName = ollamaModelConfig.translate) {
   const prompt = `
 您是一位專業的同聲傳譯與 Podcast 導讀專家。請將以下這段 Podcast 的英文字幕段落進行精確、流暢的繁體中文（台灣習慣用語）翻譯。
 
@@ -110,7 +121,7 @@ export async function translateWithOllama(englishText, modelName = 'qwen2.5:14b'
 }
 
 // 呼叫本地 Ollama 進行大綱生成
-export async function summarizeWithOllama(fullEnglishText, modelName = 'qwen2.5:14b') {
+export async function summarizeWithOllama(fullEnglishText, modelName = ollamaModelConfig.summary) {
   const prompt = `
 請閱讀以下 Podcast 前段內容，並以繁體中文整理出：
 1. 這一集 Podcast 的核心主旨與探討內容。
@@ -158,14 +169,14 @@ export async function translateTitleToSlug(title, videoId) {
 "${title}"
 `;
 
-  // 1. 優先使用本地免費的 Ollama 14b / 7b 進行翻譯，確保完全免費與本地隱私
+  // 1. 優先使用本地免費的 Ollama 進行翻譯，確保完全免費與本地隱私
   try {
-    console.log(`[Slug AI] 正在優先使用本地免費 Ollama (14b) 將標題翻譯為英文 Slug...`);
+    console.log(`[Slug AI] 正在優先使用本地免費 Ollama (${ollamaModelConfig.slug}) 將標題翻譯為英文 Slug...`);
     const response = await fetch('http://127.0.0.1:11434/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'qwen2.5:14b',
+        model: ollamaModelConfig.slug,
         messages: [{ role: 'user', content: prompt }],
         stream: false
       }),
@@ -176,18 +187,18 @@ export async function translateTitleToSlug(title, videoId) {
       const slugText = data.message.content.trim().toLowerCase();
       const cleaned = slugText.replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-').replace(/^-+|-+$/g, '');
       if (cleaned && cleaned.length > 2) {
-        console.log(`[Slug AI] Ollama 14b 翻譯結果: ${cleaned}`);
+        console.log(`[Slug AI] Ollama ${ollamaModelConfig.slug} 翻譯結果: ${cleaned}`);
         return cleaned;
       }
     }
   } catch (err) {
-    console.warn(`[Slug AI] ⚠️ Ollama 14b 翻譯 Slug 失敗，嘗試 7b...`, err.message);
+    console.warn(`[Slug AI] ⚠️ Ollama ${ollamaModelConfig.slug} 翻譯 Slug 失敗，嘗試 ${ollamaModelConfig.slugFallback}...`, err.message);
     try {
       const response = await fetch('http://127.0.0.1:11434/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: 'qwen2.5:7b',
+          model: ollamaModelConfig.slugFallback,
           messages: [{ role: 'user', content: prompt }],
           stream: false
         }),
@@ -198,12 +209,12 @@ export async function translateTitleToSlug(title, videoId) {
         const slugText = data.message.content.trim().toLowerCase();
         const cleaned = slugText.replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-').replace(/^-+|-+$/g, '');
         if (cleaned && cleaned.length > 2) {
-          console.log(`[Slug AI] Ollama 7b 翻譯結果: ${cleaned}`);
+          console.log(`[Slug AI] Ollama ${ollamaModelConfig.slugFallback} 翻譯結果: ${cleaned}`);
           return cleaned;
         }
       }
     } catch (eInner) {
-      console.warn(`[Slug AI] ⚠️ Ollama 7b 翻譯 Slug 也失敗`, eInner.message);
+      console.warn(`[Slug AI] ⚠️ Ollama ${ollamaModelConfig.slugFallback} 翻譯 Slug 也失敗`, eInner.message);
     }
   }
 

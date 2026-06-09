@@ -4,13 +4,14 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
+import crypto from 'crypto';
 import { YoutubeTranscript } from 'youtube-transcript';
 
 // 導入自訂中間件
 import { isLocalRequest, verifyGitBookPassword, apiLimiter } from './src/middleware/auth.js';
 
 // 導入 AI 翻譯服務與實體
-import { ai, enqueueOllamaTask, translateWithOllama, summarizeWithOllama, translationQueueManager } from './src/services/ai.service.js';
+import { ai, enqueueOllamaTask, ollamaModelConfig, translateWithOllama, summarizeWithOllama, translationQueueManager } from './src/services/ai.service.js';
 
 // 導入 GitBook 發佈服務
 import { publishToGitBook } from './src/services/gitbook.service.js';
@@ -161,10 +162,10 @@ app.post('/api/translate', async (req, res) => {
           translatedTitle = titleResponse.text ? titleResponse.text.trim() : '';
         } else {
           try {
-            translatedTitle = await enqueueOllamaTask(() => translateWithOllama(title, 'qwen2.5:14b'));
+            translatedTitle = await enqueueOllamaTask(() => translateWithOllama(title, ollamaModelConfig.translate));
           } catch (ollamaErr) {
             try {
-              translatedTitle = await enqueueOllamaTask(() => translateWithOllama(title, 'qwen2.5:7b'));
+              translatedTitle = await enqueueOllamaTask(() => translateWithOllama(title, ollamaModelConfig.translateFallback));
             } catch (err) {
               translatedTitle = '';
             }
@@ -225,12 +226,12 @@ app.post('/api/translate', async (req, res) => {
           chineseText = response.text ? response.text.trim() : '（翻譯失敗）';
         } else {
           try {
-            chineseText = await enqueueOllamaTask(() => translateWithOllama(englishText, 'qwen2.5:14b'));
+            chineseText = await enqueueOllamaTask(() => translateWithOllama(englishText, ollamaModelConfig.translate));
           } catch (ollamaErr) {
             try {
-              chineseText = await enqueueOllamaTask(() => translateWithOllama(englishText, 'qwen2.5:7b'));
+              chineseText = await enqueueOllamaTask(() => translateWithOllama(englishText, ollamaModelConfig.translateFallback));
             } catch (errInner) {
-              throw new Error('本地 Ollama 服務未開啟，請在終端機執行 `ollama run qwen2.5:14b`，或切換為雲端 Gemini 模式。');
+              throw new Error(`本地 Ollama 服務未開啟，請在終端機執行 \`ollama run ${ollamaModelConfig.translate}\`，或切換為雲端 Gemini 模式。`);
             }
           }
         }
@@ -269,10 +270,10 @@ Podcast 內容：
           summaryText = summaryResponse.text ? summaryResponse.text.trim() : '無法生成摘要。';
         } else {
           try {
-            summaryText = await enqueueOllamaTask(() => summarizeWithOllama(fullEnglishText, 'qwen2.5:14b'));
+            summaryText = await enqueueOllamaTask(() => summarizeWithOllama(fullEnglishText, ollamaModelConfig.summary));
           } catch (ollamaErr) {
             try {
-              summaryText = await enqueueOllamaTask(() => summarizeWithOllama(fullEnglishText, 'qwen2.5:7b'));
+              summaryText = await enqueueOllamaTask(() => summarizeWithOllama(fullEnglishText, ollamaModelConfig.summaryFallback));
             } catch (err) {
               summaryText = '本地大腦摘要生成失敗，請檢查 Ollama 運作狀態。';
             }
@@ -318,14 +319,36 @@ app.post('/api/gitbook/publish', verifyGitBookPassword, async (req, res) => {
   }
 });
 
+// 儲存模擬任務進度，以利狀態輪詢展示
+const mockJobs = new Map();
+
 // 4. 將社交分享限動卡片同步發佈至社交發佈微服務
 app.post('/api/social/publish', async (req, res) => {
-  const { title, url, image } = req.body;
+  const { title, url, image, mockMode } = req.body;
   if (!title || !url || !image) {
     return res.status(400).json({ error: '缺少必要分享參數' });
   }
 
   const caption = `🎙️ 我剛翻譯了一篇雙人社交舞 Podcast 筆記！\n\n標題：${title}\n閱讀全文對照：${url}\n\n#salsa #bachata #socialdancing #podcast`;
+
+  // 若使用者選擇 Demo 模擬模式
+  if (mockMode) {
+    const jobId = `mock-${crypto.randomUUID()}`;
+    mockJobs.set(jobId, {
+      jobId,
+      status: 'queued',
+      platforms: ['instagram'],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    console.log(`[Microservice Mock] 建立模擬任務: ${jobId}`);
+    return res.status(202).json({
+      success: true,
+      jobId,
+      mocked: true,
+      message: '模擬模式：已成功排入模擬發佈佇列！'
+    });
+  }
 
   try {
     console.log('[Microservice] 正在將分享卡片遞送至 social-post-service...');
@@ -343,10 +366,10 @@ app.post('/api/social/publish', async (req, res) => {
       signal: AbortSignal.timeout(5000)
     });
 
-    if (response.ok) {
+    if (response.ok || response.status === 202) {
       const data = await response.json();
       console.log('[Microservice] 遞送成功！微服務回傳任務 ID:', data.jobId);
-      return res.json({ success: true, jobId: data.jobId, message: '已成功排入發佈微服務佇列！' });
+      return res.status(202).json({ success: true, jobId: data.jobId, message: '已成功排入發佈微服務佇列！' });
     }
     
     // 微服務有響應但回傳錯誤狀態碼（如 400 或 500），應回傳真實錯誤，不應降級模擬
@@ -355,13 +378,54 @@ app.post('/api/social/publish', async (req, res) => {
     console.warn(`[Microservice] ⚠️ 微服務主動拒絕發佈: ${errMsg}`);
     return res.status(response.status).json({ error: errMsg });
   } catch (err) {
-    console.warn('[Microservice] ⚠️ 微服務連線失敗，降級為模擬成功模式:', err.message);
-    // 降級退化方案：在微服務未開啟時，回傳模擬成功，確保前端展示不報錯
-    res.json({
-      success: true,
-      mocked: true,
-      message: '本地發佈微服務未開啟，已自動降級為 Mock 模擬成功排程發佈！'
+    console.error(`[Microservice] ❌ 連線微服務失敗 (Live 模式):`, err.message);
+    // 實體微服務模式下，若連線失敗，回傳 503 服務不可用，讓前端明確知曉並進行引導
+    return res.status(503).json({
+      error: '無法連線至社交發佈微服務，請確認 social-post-service 是否已正常啟動（埠號 3012）。'
     });
+  }
+});
+
+// 5. 輪詢特定社交發佈任務狀態
+app.get('/api/social/status/:jobId', async (req, res) => {
+  const { jobId } = req.params;
+
+  // 處理模擬任務
+  if (jobId.startsWith('mock-')) {
+    const job = mockJobs.get(jobId);
+    if (!job) {
+      return res.status(404).json({ error: `找不到模擬任務: ${jobId}` });
+    }
+
+    // 根據經歷時間計算模擬狀態轉換 (queued -> posting -> completed)
+    const elapsed = Date.now() - new Date(job.createdAt).getTime();
+    if (elapsed > 4000) {
+      job.status = 'completed';
+      job.results = [{ platform: 'instagram', success: true, platformPostId: `mock_ig_${jobId.slice(5, 11)}` }];
+    } else if (elapsed > 1500) {
+      job.status = 'posting';
+    }
+
+    job.updatedAt = new Date().toISOString();
+    return res.json(job);
+  }
+
+  // 處理實體微服務任務狀態代理
+  try {
+    const socialServiceUrl = process.env.SOCIAL_POST_SERVICE_URL || 'http://localhost:3012/api/posts';
+    const response = await fetch(`${socialServiceUrl}/${jobId}`, {
+      signal: AbortSignal.timeout(3000)
+    });
+
+    if (response.ok) {
+      const job = await response.json();
+      return res.json(job);
+    }
+
+    return res.status(response.status).json({ error: `查詢微服務任務狀態失敗 (代碼 ${response.status})` });
+  } catch (err) {
+    console.error(`[Microservice] 查詢任務 ${jobId} 失敗:`, err.message);
+    return res.status(503).json({ error: '連線微服務查詢狀態逾時或失敗' });
   }
 });
 

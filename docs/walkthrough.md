@@ -2,7 +2,7 @@
 
 We have successfully migrated the translation pipeline of the **YouTube Podcast Translator** to use **Server-Sent Events (SSE)** and completed three user-requested enhancements:
 1. **Bilingual Title Translation**: Automated fetching of original video title via oEmbed and translating it to prepend the Chinese translation.
-2. **GitBook Embedded Player**: Injected YouTube video `<iframe>` player and target `_blank` link in the published GitBook Markdown file to facilitate listening and reading side-by-side on mobile devices.
+2. **GitBook Embedded Player**: Injected the official GitBook `{% embed url="..." %}` block and a direct YouTube fallback link in the published GitBook Markdown file to facilitate listening and reading side-by-side on mobile devices.
 3. **Direct GitBook Success Links**: Generated and returned the final GitBook page URL in the publishing API, rendering a clickable shortcut directly in the frontend success banner.
 
 ## Detailed Changes
@@ -10,7 +10,7 @@ We have successfully migrated the translation pipeline of the **YouTube Podcast 
 ### 1. Backend (`server.js`)
 * **Metadata Extraction**: Integrated YouTube oEmbed API inside `/api/transcript` to retrieve the video title dynamically.
 * **Title Translator**: Added title translation step to `/api/translate` to build the default formatted title `[Chinese Translation] - Original Title`.
-* **Markdown Customization**: Added `<iframe ...>` embed syntax and updated markdown links to standard target `_blank` anchor elements inside `/api/gitbook/publish`.
+* **Markdown Customization**: Added GitBook's official embed block syntax inside the GitBook publisher instead of raw iframe HTML, which can be sanitized or rendered as plain text by GitBook sync.
 * **Link Propagation**: Extracted the final GitBook page slug and returned the complete URL in the publish response payload.
 
 ### 2. Frontend (`App.jsx`)
@@ -19,3 +19,47 @@ We have successfully migrated the translation pipeline of the **YouTube Podcast 
 
 ### 3. Rebuild and Deploy
 * Rebuilt using `npm run build:frontend` and restarted with `pm2 restart youtube-podcast-translator --update-env`.
+
+## Technical Notes
+
+### GitBook YouTube Embed
+
+GitBook's Markdown sync supports an official embed block:
+
+```md
+{% embed url="https://www.youtube.com/watch?v=VIDEO_ID" %}
+```
+
+Use this for published GitBook notes instead of raw `<iframe>` HTML. Raw iframe can be sanitized, rendered as plain text, or behave inconsistently after GitBook sync. The generated note still keeps a normal YouTube link above the embed as a fallback for browsers or mobile contexts where embedded playback is constrained.
+
+### Fast Local Ollama Defaults
+
+The local Ollama path now treats model choice as runtime configuration instead of hard-coding `qwen2.5:14b`.
+
+Default split:
+
+```bash
+OLLAMA_TRANSLATE_MODEL=qwen2.5:7b
+OLLAMA_TRANSLATE_FALLBACK_MODEL=qwen3:4b
+OLLAMA_SUMMARY_MODEL=qwen3:4b
+OLLAMA_SUMMARY_FALLBACK_MODEL=qwen2.5:7b
+OLLAMA_SLUG_MODEL=qwen3:4b
+OLLAMA_SLUG_FALLBACK_MODEL=qwen2.5:7b
+```
+
+Reasoning:
+
+- full podcast translation needs better Traditional Chinese stability, so `qwen2.5:7b` is the safer fast default
+- summary and slug generation can prioritize latency, so `qwen3:4b` is acceptable
+- `gemma3:4b` and `gemma3n:e4b` are valid candidates for speed experiments, but should be manually checked for Taiwan Mandarin and social-dance terminology quality before becoming defaults
+- for interview demos, Gemini 2.5 Flash remains the smoothest path; local Ollama is the offline/privacy/cost-control path
+
+### Microservice Error Semantics
+
+The social publish path now separates demo mock mode from live service mode:
+
+- demo mock mode returns `202` and simulates a job lifecycle for presentation
+- live mode returns `503` when `social-post-service` is unreachable
+- downstream `400/500` errors are propagated instead of being wrapped as fake success
+
+This keeps the demo convenient without lying about distributed-system health.
