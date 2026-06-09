@@ -65,3 +65,35 @@ The social publish path now separates demo mock mode from live service mode:
 - downstream `400/500` errors are propagated instead of being wrapped as fake success
 
 This keeps the demo convenient without lying about distributed-system health or hiding the microservice boundary.
+
+### What Changed From The Earlier Implementation
+
+Before this change, demo mode lived inside `youtube-podcast-translator`:
+
+- `server.js` kept an in-memory `mockJobs` map
+- demo publish created a `mock-*` job without calling `social-post-service`
+- status polling for mock jobs was simulated by the translator process itself
+- this was useful for UI demos, but it was not a real microservice boundary
+
+After this change, the translator is only a proxy:
+
+- demo mode sends `mode: "mock"` to `social-post-service`
+- live mode sends `mode: "live"` to `social-post-service`
+- `social-post-service` owns job creation, status transitions, and polling results
+- live mode fails with `503` when the downstream service is unavailable or only has `MockStrategy`
+
+### Microservice Tradeoffs
+
+Benefits:
+
+- clearer separation between translation/GitBook work and social posting work
+- easier to add real posting providers later without changing the translator API surface
+- async `202 Accepted + jobId + polling` fits slow provider APIs better than synchronous requests
+- failures are observable instead of being hidden behind fake success responses
+
+Costs:
+
+- local demos now require both services to be running
+- deployment needs one more process, port, health check, and log stream
+- debugging crosses process boundaries, so job IDs and logs matter more
+- the current in-memory job store is not durable; production use would need Redis/BullMQ or a database
