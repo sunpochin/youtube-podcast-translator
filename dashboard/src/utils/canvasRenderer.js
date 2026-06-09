@@ -53,12 +53,12 @@ function drawWrapText(ctx, text, x, y, maxWidth, lineHeight) {
 }
 
 /**
- * 繪製 QR Code 離線或超時的降級佔位圖
+ * 繪製 QR Code 生成失敗時的降級佔位圖
  */
 function drawFallbackPlaceholder(ctx, canvas, resolve, reject, options = {}, isTimeout = false) {
   const { shortUrl = '', publishUrl = '' } = options
 
-  // 離線降級處理：繪製精美的替代佔位圖，避免顯示空白
+  // 本地 QR 生成失敗時，繪製精美的替代佔位圖，避免顯示空白。
   ctx.fillStyle = 'rgba(255, 255, 255, 0.06)'
   ctx.strokeStyle = 'rgba(29, 185, 84, 0.4)'
   ctx.lineWidth = 4
@@ -77,7 +77,7 @@ function drawFallbackPlaceholder(ctx, canvas, resolve, reject, options = {}, isT
 
   ctx.fillStyle = '#888888'
   ctx.font = '20px system-ui, -apple-system, sans-serif'
-  ctx.fillText(isTimeout ? '(QR 載入逾時)' : '(QR 服務離線)', 540, 1255)
+  ctx.fillText(isTimeout ? '(QR 生成逾時)' : '(QR 生成失敗)', 540, 1255)
 
   // 繪製頂部手機看截圖說明
   ctx.fillStyle = '#a7a7a7'
@@ -102,7 +102,7 @@ function drawFallbackPlaceholder(ctx, canvas, resolve, reject, options = {}, isT
     const base64Data = canvas.toDataURL('image/png')
     resolve(base64Data)
   } catch (err) {
-    reject(new Error(`導出失敗 (Tainted Canvas)：${err.message}`))
+    reject(new Error(`導出失敗：${err.message}`))
   }
 }
 
@@ -213,7 +213,7 @@ export async function generateShareCard(title, publishUrl, options = {}) {
         const base64Data = canvas.toDataURL('image/png')
         resolve(base64Data)
       } catch (err) {
-        reject(new Error(`導出失敗 (Tainted Canvas)：${err.message}`))
+        reject(new Error(`導出失敗：${err.message}`))
       }
     } else {
       // 繪製手機看截圖說明
@@ -256,7 +256,7 @@ export async function generateShareCard(title, publishUrl, options = {}) {
             const base64Data = canvas.toDataURL('image/png')
             resolve(base64Data)
           } catch (err) {
-            reject(new Error(`導出失敗 (Tainted Canvas)：${err.message}`))
+            reject(new Error(`導出失敗：${err.message}`))
           }
         }
         qrImage.src = qrDataUrl
