@@ -1,7 +1,13 @@
+// dashboard/src/App.jsx
+// 主應用程式入口，處理狀態管理、API 連線、並協調整體 UI 組件排版
+
 import { useState, useEffect } from 'react'
-import { Play, Search, CheckCircle, AlertTriangle, FileText, Download, Sparkles, Languages, Clock } from 'lucide-react'
+import { Play, Search, CheckCircle, AlertTriangle, FileText, Download, Sparkles, Clock } from 'lucide-react'
 import QRCode from 'qrcode'
 import { generateShareCard } from './utils/canvasRenderer'
+import Header from './components/Header'
+import ShareModal from './components/ShareModal'
+import TranscriptPanel from './components/TranscriptPanel'
 
 // 輔助函數：將秒數格式化為 mm:ss
 function formatTime(seconds) {
@@ -253,19 +259,19 @@ function App() {
   const exportMarkdown = () => {
     if (translatedParagraphs.length === 0) return
     
-    let content = `# YouTube Podcast 導讀筆記\\n\\n`
-    content += `> 影片連結: [YouTube 網頁連結 (新分頁開啟)](https://www.youtube.com/watch?v=${videoId})\\n\\n`
-    content += `### 影片嵌入觀看 (可邊放邊對照)\\n`
-    content += `{% embed url="https://www.youtube.com/watch?v=${videoId}" %}\\n\\n`
+    let content = `# YouTube Podcast 導讀筆記\n\n`
+    content += `> 影片連結: [YouTube 網頁連結 (新分頁開啟)](https://www.youtube.com/watch?v=${videoId})\n\n`
+    content += `### 影片嵌入觀看 (可邊放邊對照)\n`
+    content += `{% embed url="https://www.youtube.com/watch?v=${videoId}" %}\n\n`
     if (summary) {
-      content += `## 核心主旨與關鍵看點\\n\\n${summary}\\n\\n`
+      content += `## 核心主旨與關鍵看點\n\n${summary}\n\n`
     }
-    content += `## 中英雙語逐字稿對照\\n\\n`
+    content += `## 中英雙語逐字稿對照\n\n`
     translatedParagraphs.forEach(p => {
-      content += `### [${formatTime(p.start)} - ${formatTime(p.end)}]\\n`
-      content += `**英文原文**:\\n${p.english}\\n\\n`
-      content += `**中文對照**:\\n${p.chinese}\\n\\n`
-      content += `---\\n\\n`
+      content += `### [${formatTime(p.start)} - ${formatTime(p.end)}]\n`
+      content += `**英文原文**:\n${p.english}\n\n`
+      content += `**中文對照**:\n${p.chinese}\n\n`
+      content += `---\n\n`
     })
 
     const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
@@ -462,32 +468,7 @@ function App() {
 
   return (
     <div className="min-h-screen bg-spotify-dark text-white flex flex-col selection:bg-spotify-green selection:text-black">
-      {/* 頂部導航列 */}
-      <header className="border-b border-white/10 bg-black/40 backdrop-blur-md sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="bg-red-600 p-2 rounded-lg text-white">
-              <Play size={24} fill="white" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight text-white m-0">Podcast 中文對照翻譯器</h1>
-              <p className="text-xs text-spotify-text m-0">
-                輸入 YouTube 連結，AI 導讀
-                <del className="relative mx-1 inline-block no-underline opacity-70 after:absolute after:left-0 after:top-1/2 after:h-[1px] after:w-full after:-rotate-12 after:bg-current after:content-['']">
-                  秒級
-                </del>
-                <ins className="no-underline font-medium">
-                  小時級
-                </ins>
-                搞定
-              </p>
-            </div>
-          </div>
-          <div className="text-xs text-white/40 font-mono">
-            Powered by Gemini 2.5 Flash
-          </div>
-        </div>
-      </header>
+      <Header />
 
       {/* 主內容區 */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 py-8 flex flex-col gap-6">
@@ -718,356 +699,45 @@ function App() {
             </div>
 
             {/* 右邊：大綱與逐字稿雙欄對照閱讀器 */}
-            <div className="lg:col-span-2 flex flex-col bg-spotify-card border border-white/5 rounded-2xl overflow-hidden shadow-lg">
-              
-              {/* Tab 控制列 */}
-              <div className="flex border-b border-white/10 bg-black/20 p-2">
-                <button
-                  onClick={() => setActiveTab('full')}
-                  className={`flex-1 py-3 px-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all ${activeTab === 'full' ? 'bg-white/10 text-white' : 'text-spotify-text hover:text-white'}`}
-                >
-                  <Languages size={16} />
-                  <span>中英逐字對照</span>
-                </button>
-                {translatedParagraphs.length > 0 && (
-                  <button
-                    onClick={() => setActiveTab('summary')}
-                    className={`flex-1 py-3 px-4 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 transition-all ${activeTab === 'summary' ? 'bg-white/10 text-white' : 'text-spotify-text hover:text-white'}`}
-                  >
-                    <Sparkles size={16} />
-                    <span>大綱與精華導讀</span>
-                  </button>
-                )}
-              </div>
-
-              {/* 內容展現區 */}
-              <div className="flex-1 overflow-y-auto p-6 max-h-[600px]">
-                
-                {/* 1. 中英逐字對照面板 */}
-                {activeTab === 'full' && (
-                  <div className="space-y-6">
-                    {translatedParagraphs.length > 0 ? (
-                      // 顯示翻譯後的段落對照
-                      translatedParagraphs.map((paragraph, index) => (
-                        <div key={index} className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-6 border-b border-white/5 last:border-b-0 hover:bg-white/[0.01] p-3 rounded-xl transition-all">
-                          {/* 英文段落 */}
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-2 text-xs font-mono text-spotify-green">
-                              <Clock size={12} />
-                              <span>{formatTime(paragraph.start)} - {formatTime(paragraph.end)}</span>
-                            </div>
-                            <p className="text-sm leading-relaxed text-white/90 font-light select-text">
-                              {paragraph.english}
-                            </p>
-                          </div>
-                          {/* 中文段落 */}
-                          <div className="space-y-2 md:border-l md:border-white/5 md:pl-4">
-                            <span className="text-xs font-semibold text-spotify-text">中文對照</span>
-                            <p className="text-sm leading-relaxed text-spotify-green/90 font-normal select-text">
-                              {paragraph.chinese}
-                            </p>
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      // 僅顯示抓取到的英文逐字稿 (未翻譯前)
-                      <div className="space-y-4">
-                        <div className="p-3 bg-white/5 rounded-xl text-sm text-spotify-text mb-4">
-                          提示：以下為未翻譯之原始英文字幕。您可以點選左側「啟動 AI 雙語翻譯」獲取中英對照與大綱分析。
-                        </div>
-                        {transcript.map((item, index) => (
-                          <div key={index} className="flex items-start gap-4 hover:bg-white/[0.02] p-2 rounded-lg transition-all">
-                            <span className="text-xs font-mono text-white/40 shrink-0 mt-1">{formatTime(item.start)}</span>
-                            <p className="text-sm text-white/80 select-text">{item.text}</p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* 2. 大綱與精華導讀面板 */}
-                {activeTab === 'summary' && summary && (
-                  <div className="prose prose-invert max-w-none space-y-6">
-                    <div className="bg-black/30 p-5 rounded-2xl border border-white/5">
-                      <h3 className="text-lg font-bold text-white flex items-center gap-2 mb-3">
-                        <Sparkles size={18} className="text-spotify-green" />
-                        <span>AI 導讀精華摘要</span>
-                      </h3>
-                      {/* 以換行字元分割並輸出 */}
-                      {summary.split('\\n').map((line, idx) => {
-                        if (line.startsWith('#')) {
-                          return <h4 key={idx} className="text-md font-semibold text-white mt-4 mb-2">{line.replace(/#/g, '').trim()}</h4>
-                        }
-                        if (line.startsWith('-') || line.startsWith('*')) {
-                          return <li key={idx} className="text-sm text-spotify-text list-disc list-inside ml-2 py-0.5">{line.substring(1).trim()}</li>
-                        }
-                        return <p key={idx} className="text-sm text-spotify-text leading-relaxed py-1">{line}</p>
-                      })}
-                    </div>
-                  </div>
-                )}
-
-              </div>
-            </div>
+            <TranscriptPanel
+              activeTab={activeTab}
+              setActiveTab={setActiveTab}
+              translatedParagraphs={translatedParagraphs}
+              transcript={transcript}
+              summary={summary}
+            />
 
           </div>
         )}
+
       {/* 🚀 IG 限動卡片與微服務分享彈窗 */}
-      {showShareModal && publishMessage?.success && (
-        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[100] flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-spotify-card border border-white/10 rounded-3xl max-w-md w-full p-6 shadow-2xl relative flex flex-col gap-5 my-8 animate-fade-in text-center">
-            
-            {/* 關閉按鈕 */}
-            <button
-              onClick={() => {
-                setShowShareModal(false)
-                setSocialShareMessage(null)
-                setPollingStatus(null)
-              }}
-              className="absolute top-4 right-4 text-white/40 hover:text-white bg-white/5 hover:bg-white/10 p-1.5 rounded-full transition-all text-sm font-semibold"
-            >
-              ✕
-            </button>
-
-            <div>
-              <h3 className="text-xl font-bold text-white flex items-center justify-center gap-2">
-                <Sparkles className="text-spotify-green animate-pulse" size={20} />
-                <span>發佈成功！產生成果卡片</span>
-              </h3>
-              <p className="text-xs text-spotify-text mt-1">
-                下方為您的專屬 IG Story 9:16 分享美圖與掃描二維碼
-              </p>
-            </div>
-
-            {/* 模式切換頁籤 */}
-            <div className="flex bg-white/5 p-1 rounded-xl border border-white/10 gap-1 select-none">
-              <button
-                onClick={() => setShareMode('semi_auto')}
-                className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${shareMode === 'semi_auto' ? 'bg-spotify-green text-black' : 'text-gray-400 hover:text-white'}`}
-              >
-                🔥 半自動高轉換
-              </button>
-              <button
-                onClick={() => setShareMode('auto')}
-                className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${shareMode === 'auto' ? 'bg-spotify-green text-black' : 'text-gray-400 hover:text-white'}`}
-              >
-                📲 全自動
-              </button>
-              <button
-                onClick={() => setShareMode('keyword')}
-                className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-semibold transition-all ${shareMode === 'keyword' ? 'bg-spotify-green text-black' : 'text-gray-400 hover:text-white'}`}
-              >
-                💬 關鍵字回覆
-              </button>
-            </div>
-
-            {/* 卡片設定輸入框 */}
-            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex flex-col gap-3 text-left">
-              <div>
-                <label className="text-xs font-semibold text-gray-300 block mb-1">自訂圖卡短網址 (選填)：</label>
-                <input
-                  type="text"
-                  placeholder={`預設: ${publishMessage.url.replace(/^https?:\/\//, '').replace(/^www\./, '').substring(0, 25)}...`}
-                  value={customShortUrl}
-                  onChange={(e) => setCustomShortUrl(e.target.value)}
-                  className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-spotify-green/60"
-                />
-              </div>
-
-              {shareMode === 'keyword' && (
-                <div>
-                  <label className="text-xs font-semibold text-gray-300 block mb-1">私訊回覆關鍵字：</label>
-                  <input
-                    type="text"
-                    placeholder="例如: 文章"
-                    value={keyword}
-                    onChange={(e) => setKeyword(e.target.value)}
-                    className="w-full bg-black/40 border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-spotify-green/60"
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* 玩法指引 */}
-            <div className="text-xs text-left leading-relaxed p-3.5 rounded-2xl bg-spotify-green/10 border border-spotify-green/20 text-spotify-green flex flex-col gap-1">
-              {shareMode === 'semi_auto' && (
-                <>
-                  <span className="font-bold text-white flex items-center gap-1.5">🔥 轉換率最高的推薦玩法：</span>
-                  <span className="text-gray-300">1. 點擊下方<strong>「🔗 複製文章連結」</strong>按鈕。</span>
-                  <span className="text-gray-300">2. 點擊<strong>「📲 一鍵分享至 IG 限動」</strong>下載特製 Story 圖卡。</span>
-                  <span className="text-gray-300">3. 手動打開 IG 貼上圖卡，並用貼紙工具新增 <strong>Link sticker</strong> 貼上網址。</span>
-                </>
-              )}
-              {shareMode === 'auto' && (
-                <>
-                  <span className="font-bold text-white flex items-center gap-1.5">📲 機器人全自動代發限動：</span>
-                  <span className="text-gray-300">點擊<strong>「🚀 遞交至發佈微服務」</strong>，程式會把圖卡發上 IG。</span>
-                  <span className="text-gray-300 text-[10px] text-amber-400 mt-1 leading-normal">⚠️ 提醒：因 IG API 限制，代發的限動<strong>不支援</strong>可點擊貼紙，受眾需掃 QR code 或手動輸入短網址。</span>
-                </>
-              )}
-              {shareMode === 'keyword' && (
-                <>
-                  <span className="font-bold text-white flex items-center gap-1.5">💬 私訊自動回覆模式：</span>
-                  <span className="text-gray-300">圖卡將印上引導受眾回覆<strong>「{keyword}」</strong>暗號的精美對話泡泡。</span>
-                  <span className="text-gray-300">下載此圖卡發到 IG，受眾回覆限動即觸發自動回覆（如 ManyChat）傳送全文。</span>
-                </>
-              )}
-            </div>
-
-            {/* 卡片預覽 (9:16) */}
-            <div className="aspect-[9/16] w-full max-w-[230px] mx-auto bg-gradient-to-b from-[#0a0a0a] to-[#181818] rounded-2xl border border-white/10 p-4 relative flex flex-col justify-between shadow-2xl overflow-hidden text-center shrink-0 select-none">
-              {/* 發光裝飾背景 */}
-              <div className="absolute top-[-50px] left-[-50px] w-64 h-64 bg-spotify-green/10 rounded-full filter blur-3xl pointer-events-none"></div>
-              
-              <div className="border border-white/5 bg-white/[0.03] rounded-xl p-3 flex-1 flex flex-col justify-between items-center text-center">
-                <div className="text-xl mt-1">🎙️</div>
-                <div className="text-[10px] font-bold line-clamp-3 leading-normal my-1 px-1 text-white/95">
-                  {publishTitle || videoTitle || 'Podcast 翻譯筆記'}
-                </div>
-                <div className="w-12 border-t border-white/10 my-0.5"></div>
-                <div className="text-[8px] text-spotify-green font-bold tracking-wider uppercase">
-                  Salsa & Bachata Dance
-                </div>
-                
-                {shareMode === 'keyword' ? (
-                  // Mode C 氣泡預覽
-                  <div className="w-full border border-spotify-green/20 bg-spotify-green/5 rounded-lg p-2 my-1.5 text-center flex flex-col justify-center items-center gap-0.5">
-                    <div className="text-[9px] text-white/90 font-bold">💬 想要閱讀全文？</div>
-                    <div className="text-[7px] text-white/50">在下方回覆或私訊：</div>
-                    <div className="text-[12px] text-spotify-green font-extrabold my-0.5">「{keyword}」</div>
-                    <div className="text-[7px] text-white/50">我會自動傳送連結給您！</div>
-                  </div>
-                ) : (
-                  // Mode A & B QR 預覽
-                  <>
-                    <div className="text-[7px] text-white/40 mt-1.5">
-                      👇 手機看請截圖，再長按 QR code
-                    </div>
-                    {qrPreviewDataUrl ? (
-                      <img
-                        src={qrPreviewDataUrl}
-                        alt="QR Code"
-                        className="w-20 h-20 bg-white p-1 rounded-lg shadow-md my-1.5"
-                      />
-                    ) : (
-                      <div className="w-20 h-20 bg-white/10 border border-spotify-green/30 rounded-lg shadow-md my-1.5 flex items-center justify-center text-[7px] text-spotify-green font-bold leading-tight px-1">
-                        QR 生成中
-                      </div>
-                    )}
-                  </>
-                )}
-                
-                <div className="text-[7px] text-white/40 leading-snug line-clamp-1">
-                  {shareMode === 'keyword' ? '或手動輸入：' : '或輸入：'}
-                  {customShortUrl || publishMessage.url.replace(/^https?:\/\//, '').replace(/^www\./, '')}
-                </div>
-                <div className="text-[7px] text-spotify-green font-bold mt-0.5 tracking-widest uppercase">
-                  {shareMode === 'keyword' ? 'REPLY FOR LINK' : 'SCAN TO READ'}
-                </div>
-              </div>
-            </div>
-
-            {/* 微服務整合模式選擇器 */}
-            <div className="bg-white/5 border border-white/10 rounded-xl p-3 flex flex-col gap-2 text-left">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-gray-300">微服務整合模式：</span>
-                <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${mockMode ? 'bg-amber-500/20 text-amber-400' : 'bg-emerald-500/20 text-emerald-400'}`}>
-                  {mockMode ? '模擬展示 (Demo)' : '實體微服務 (Live)'}
-                </span>
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <button
-                  onClick={() => setMockMode(true)}
-                  disabled={sharingToMicroservice}
-                  className={`py-1.5 px-2 rounded-lg font-medium transition-all ${mockMode ? 'bg-purple-600/30 text-purple-300 border border-purple-500/40' : 'bg-transparent text-gray-400 hover:text-white border border-transparent'}`}
-                >
-                  🎭 模擬展示
-                </button>
-                <button
-                  onClick={() => setMockMode(false)}
-                  disabled={sharingToMicroservice}
-                  className={`py-1.5 px-2 rounded-lg font-medium transition-all ${!mockMode ? 'bg-indigo-600/30 text-indigo-300 border border-indigo-500/40' : 'bg-transparent text-gray-400 hover:text-white border border-transparent'}`}
-                >
-                  ⚡ 實體微服務
-                </button>
-              </div>
-            </div>
-
-            {/* 控制按鈕組 */}
-            <div className="flex flex-col gap-3">
-              <button
-                onClick={handleCopyLink}
-                className="w-full bg-white/10 hover:bg-white/15 text-white font-semibold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all border border-white/5 text-sm"
-              >
-                <span>{copiedLink ? '✓ 已複製連結！' : '🔗 複製文章連結'}</span>
-              </button>
-              
-              <button
-                onClick={handleNativeShare}
-                className="w-full bg-spotify-green hover:bg-spotify-green/90 text-black font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all text-sm"
-              >
-                <span>📲 一鍵分享至 IG 限動 / 下載卡片</span>
-              </button>
-
-              <button
-                onClick={handleShareToMicroservice}
-                disabled={sharingToMicroservice}
-                className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all text-sm disabled:opacity-50"
-              >
-                {sharingToMicroservice && pollingStatus ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                    <span>
-                      {pollingStatus === 'queued' && '排隊中...'}
-                      {pollingStatus === 'posting' && '發佈中...'}
-                      {pollingStatus === 'completed' && '發佈完成'}
-                      {pollingStatus === 'failed' && '發佈失敗'}
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles size={16} />
-                    <span>🚀 遞交至發佈微服務</span>
-                  </>
-                )}
-              </button>
-
-              {/* 任務階段追蹤進度條 */}
-              {sharingToMicroservice && pollingStatus && (
-                <div className="bg-white/5 rounded-xl p-3 text-xs text-left border border-white/5 flex flex-col gap-2">
-                  <div className="flex justify-between items-center text-gray-400">
-                    <span>任務階段追蹤：</span>
-                    <span className="text-spotify-green animate-pulse font-mono">
-                      {pollingStatus === 'queued' && '⏳ 排隊中 (queued)'}
-                      {pollingStatus === 'posting' && '📡 發佈中 (posting)'}
-                      {pollingStatus === 'completed' && '✅ 已完成 (completed)'}
-                      {pollingStatus === 'failed' && '❌ 失敗 (failed)'}
-                    </span>
-                  </div>
-                  <div className="w-full bg-white/10 rounded-full h-1.5 overflow-hidden">
-                    <div
-                      className={`h-full transition-all duration-500 ${
-                        pollingStatus === 'queued' ? 'w-1/3 bg-amber-500' :
-                        pollingStatus === 'posting' ? 'w-2/3 bg-indigo-500' :
-                        pollingStatus === 'completed' ? 'w-full bg-spotify-green' :
-                        'w-full bg-red-500'
-                      }`}
-                    ></div>
-                  </div>
-                </div>
-              )}
-
-              {socialShareMessage && (
-                <div className={`p-3 rounded-xl text-xs border text-left leading-relaxed ${socialShareMessage.success ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-400' : 'bg-red-950/40 border-red-500/30 text-red-400'}`}>
-                  {socialShareMessage.text}
-                </div>
-              )}
-            </div>
-
-          </div>
-        </div>
-      )}
+      <ShareModal
+        show={showShareModal}
+        onClose={() => {
+          setShowShareModal(false)
+          setSocialShareMessage(null)
+          setPollingStatus(null)
+        }}
+        publishMessage={publishMessage}
+        publishTitle={publishTitle}
+        videoTitle={videoTitle}
+        qrPreviewDataUrl={qrPreviewDataUrl}
+        shareMode={shareMode}
+        setShareMode={setShareMode}
+        customShortUrl={customShortUrl}
+        setCustomShortUrl={setCustomShortUrl}
+        keyword={keyword}
+        setKeyword={setKeyword}
+        mockMode={mockMode}
+        setMockMode={setMockMode}
+        sharingToMicroservice={sharingToMicroservice}
+        pollingStatus={pollingStatus}
+        socialShareMessage={socialShareMessage}
+        handleCopyLink={handleCopyLink}
+        copiedLink={copiedLink}
+        handleNativeShare={handleNativeShare}
+        handleShareToMicroservice={handleShareToMicroservice}
+      />
       </main>
     </div>
   )
