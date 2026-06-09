@@ -13,9 +13,17 @@ export const gitExecutor = {
   exec: util.promisify(childProcess.execFile)
 };
 
+// GitOps 互斥排隊鎖，防止多個併發請求同時修改 SUMMARY.md 或競爭 Git 鎖定 (git index.lock)
+let gitopsQueuePromise = Promise.resolve();
 
-// 發佈翻譯文章至 GitBook 知識庫的核心邏輯
-export async function publishToGitBook({ videoId, summary, translatedParagraphs, title, isLocal }) {
+export async function enqueueGitOpsTask(taskFn) {
+  const nextTask = gitopsQueuePromise.then(() => taskFn());
+  gitopsQueuePromise = nextTask.catch(() => {}); // 確保即使失敗也能繼續執行下一個
+  return nextTask;
+}
+
+// 發佈翻譯文章至 GitBook 知識庫的核心邏輯 (內部核心)
+async function publishToGitBookCore({ videoId, summary, translatedParagraphs, title, isLocal }) {
   // 取得 GitBook 目錄位置，預設嘗試同級目錄 ../social-dancing-notes，若不存在則退化至原路徑
   let gitbookDir = process.env.GITBOOK_PATH;
   if (!gitbookDir) {
@@ -152,4 +160,9 @@ export async function publishToGitBook({ videoId, summary, translatedParagraphs,
     }
     return { success: true, message: `檔案已成功寫入，但 Git 推送失敗: ${gitErr.message}`, url: gitbookPageUrl };
   }
+}
+
+// 導出對外發佈介面，自動包裹於 GitOps 互斥排隊鎖中
+export async function publishToGitBook(params) {
+  return enqueueGitOpsTask(() => publishToGitBookCore(params));
 }

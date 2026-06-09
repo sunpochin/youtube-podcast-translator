@@ -12,7 +12,7 @@ export function isLocalRequest(req) {
     const mockIp = req.headers['x-mock-ip'];
     return mockIp.includes('127.0.0.1') || mockIp.includes('::1') || mockIp.includes('localhost');
   }
-  const ip = req.ip || req.connection.remoteAddress || '';
+  const ip = req.ip || req.socket?.remoteAddress || req.connection?.remoteAddress || '';
   return ip.includes('127.0.0.1') || ip.includes('::1') || ip.includes('localhost');
 }
 

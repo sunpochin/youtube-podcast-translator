@@ -48,7 +48,8 @@ export async function translateWithOllama(englishText, modelName = 'qwen2.5:14b'
           { role: 'user', content: prompt }
         ],
         stream: false
-      })
+      }),
+      signal: AbortSignal.timeout(60000) // 設定 60 秒超時以釋放佇列鎖
     });
     if (!response.ok) {
       throw new Error(`Ollama 響應失敗: ${response.status}`);
@@ -82,7 +83,8 @@ Podcast 內容：
           { role: 'user', content: prompt }
         ],
         stream: false
-      })
+      }),
+      signal: AbortSignal.timeout(60000) // 設定 60 秒超時以釋放佇列鎖
     });
     if (!response.ok) {
       throw new Error(`Ollama 摘要響應失敗: ${response.status}`);
@@ -119,7 +121,8 @@ export async function translateTitleToSlug(title, videoId) {
         model: 'qwen2.5:14b',
         messages: [{ role: 'user', content: prompt }],
         stream: false
-      })
+      }),
+      signal: AbortSignal.timeout(15000) // 標題翻譯為短文本，設定 15 秒超時
     });
     if (response.ok) {
       const data = await response.json();
@@ -140,7 +143,8 @@ export async function translateTitleToSlug(title, videoId) {
           model: 'qwen2.5:7b',
           messages: [{ role: 'user', content: prompt }],
           stream: false
-        })
+        }),
+        signal: AbortSignal.timeout(15000) // 標題翻譯為短文本，設定 15 秒超時
       });
       if (response.ok) {
         const data = await response.json();
