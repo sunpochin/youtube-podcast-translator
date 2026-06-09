@@ -4,8 +4,12 @@
 import test, { describe, before, after } from 'node:test';
 import assert from 'node:assert';
 import http from 'node:http';
+import fs from 'fs/promises';
+import path from 'path';
 import { generateSlug, generateCleanSlugFallback } from '../src/utils/helpers.js';
 import { isLocalRequest } from '../src/middleware/auth.js';
+import { translateWithOllama, summarizeWithOllama, translateTitleToSlug, ai } from '../src/services/ai.service.js';
+import { publishToGitBook, gitExecutor } from '../src/services/gitbook.service.js';
 import app from '../server.js';
 
 test('generateSlug - 應能正確清理中文與空格符號', () => {
@@ -153,5 +157,135 @@ describe('Express API 路由整合測試', () => {
     assert.strictEqual(res.status, 400);
     const data = await res.json();
     assert.ok(data.error.includes('缺少必要發佈參數'));
+  });
+});
+
+describe('AI & GitBook Services 單元測試與 Mock 驗證', () => {
+  test('translateWithOllama - 應正確模擬 Ollama HTTP 請求並返回翻譯', async (t) => {
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+      assert.strictEqual(url, 'http://127.0.0.1:11434/api/chat');
+      const body = JSON.parse(options.body);
+      assert.strictEqual(body.model, 'qwen2.5:14b');
+      return {
+        ok: true,
+        json: async () => ({
+          message: { content: '這是一段翻譯後的中文' }
+        })
+      };
+    });
+
+    const result = await translateWithOllama('This is some English text', 'qwen2.5:14b');
+    assert.strictEqual(result, '這是一段翻譯後的中文');
+  });
+
+  test('summarizeWithOllama - 應正確模擬 Ollama 摘要 HTTP 請求', async (t) => {
+    t.mock.method(globalThis, 'fetch', async (url, options) => {
+      assert.strictEqual(url, 'http://127.0.0.1:11434/api/chat');
+      const body = JSON.parse(options.body);
+      assert.strictEqual(body.model, 'qwen2.5:14b');
+      return {
+        ok: true,
+        json: async () => ({
+          message: { content: '這是整集摘要內容' }
+        })
+      };
+    });
+
+    const result = await summarizeWithOllama('This is full podcast content', 'qwen2.5:14b');
+    assert.strictEqual(result, '這是整集摘要內容');
+  });
+
+  test('translateTitleToSlug - 當 Ollama 14b 成功時，應直接使用其結果並過濾特殊字元', async (t) => {
+    t.mock.method(globalThis, 'fetch', async () => {
+      return {
+        ok: true,
+        json: async () => ({
+          message: { content: 'mocked-ollama-14b-slug!' }
+        })
+      };
+    });
+
+    const result = await translateTitleToSlug('每週一句小劇場', 'video123');
+    assert.strictEqual(result, 'mocked-ollama-14b-slug');
+  });
+
+  test('translateTitleToSlug - 當 Ollama 失敗但 Gemini 成功時，應降級使用 Gemini 並過濾特殊字元', async (t) => {
+    t.mock.method(globalThis, 'fetch', async () => {
+      throw new Error('Ollama offline');
+    });
+
+    t.mock.method(ai.models, 'generateContent', async () => {
+      return {
+        text: 'mocked-gemini-slug!'
+      };
+    });
+
+    const result = await translateTitleToSlug('每週一句小劇場', 'video123');
+    assert.strictEqual(result, 'mocked-gemini-slug');
+  });
+
+  describe('publishToGitBook 整合與安全防護測試 (Sandboxed)', () => {
+    const sandboxDir = path.join(process.cwd(), 'test_gitbook_sandbox');
+
+    before(async () => {
+      process.env.GITBOOK_PATH = sandboxDir;
+      await fs.mkdir(sandboxDir, { recursive: true });
+      await fs.writeFile(path.join(sandboxDir, 'SUMMARY.md'), '# Summary\n\n## Podcast 翻譯\n', 'utf-8');
+    });
+
+    after(async () => {
+      delete process.env.GITBOOK_PATH;
+      await fs.rm(sandboxDir, { recursive: true, force: true });
+    });
+
+    test('publishToGitBook - 應成功寫入檔案、更新 SUMMARY.md 並執行完整的 GitOps 指令', async (t) => {
+      const gitCalls = [];
+      t.mock.method(gitExecutor, 'exec', async (cmd, args) => {
+        gitCalls.push({ cmd, args });
+        if (args.includes('rev-parse')) {
+          return { stdout: 'main' };
+        }
+        return { stdout: '' };
+      });
+
+      t.mock.method(globalThis, 'fetch', async () => {
+        return {
+          ok: true,
+          json: async () => ({
+            message: { content: 'test-slug' }
+          })
+        };
+      });
+
+      const res = await publishToGitBook({
+        videoId: 'uSYCduNg1oc',
+        summary: '這是一個測試大綱',
+        translatedParagraphs: [
+          { start: 0, end: 10, english: 'Hello', chinese: '你好' }
+        ],
+        title: '測試影片標題',
+        isLocal: true
+      });
+
+      assert.strictEqual(res.success, true);
+      assert.ok(res.url.includes('test-slug'));
+
+      // 驗證自動產生的印章與標題寫入
+      const fileContent = await fs.readFile(path.join(sandboxDir, 'podcast-translations/test-slug.md'), 'utf-8');
+      assert.ok(fileContent.includes('<!-- gitbook-plugin-youtube-podcast-translator-auto-generated -->'));
+      assert.ok(fileContent.includes('測試影片標題'));
+
+      // 驗證 SUMMARY.md 被正確更新
+      const summaryContent = await fs.readFile(path.join(sandboxDir, 'SUMMARY.md'), 'utf-8');
+      assert.ok(summaryContent.includes('  * [測試影片標題](podcast-translations/test-slug.md)'));
+
+      // 驗證 Git 命令執行的順序與完整性
+      const gitCmds = gitCalls.map(c => c.args[0] || c.args[1]);
+      assert.ok(gitCmds.includes('fetch'));
+      assert.ok(gitCmds.includes('reset'));
+      assert.ok(gitCmds.includes('add'));
+      assert.ok(gitCmds.includes('commit'));
+      assert.ok(gitCmds.includes('push'));
+    });
   });
 });

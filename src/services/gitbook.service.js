@@ -3,12 +3,16 @@
 
 import path from 'path';
 import fs from 'fs/promises';
-import { execFile } from 'child_process';
+import childProcess from 'child_process';
 import util from 'util';
 import { generateCleanSlugFallback, generateSlug, formatTime } from '../utils/helpers.js';
 import { translateTitleToSlug } from './ai.service.js';
 
-const execFilePromise = util.promisify(execFile);
+// 封裝以利單元測試 Mock 模擬 Git 指令執行
+export const gitExecutor = {
+  exec: util.promisify(childProcess.execFile)
+};
+
 
 // 發佈翻譯文章至 GitBook 知識庫的核心邏輯
 export async function publishToGitBook({ videoId, summary, translatedParagraphs, title, isLocal }) {
@@ -32,11 +36,11 @@ export async function publishToGitBook({ videoId, summary, translatedParagraphs,
   // 在寫入本地檔案前，先拉取並重設為最新遠端狀態，避免多人併發或外部推送產生的 push conflict (Fast-Forward) 錯誤
   let currentBranch = 'main';
   try {
-    const { stdout: branchStdout } = await execFilePromise('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: gitbookDir });
+    const { stdout: branchStdout } = await gitExecutor.exec('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: gitbookDir });
     currentBranch = branchStdout.trim();
     console.log(`[GitOps] 正在從遠端同步 GitBook (${currentBranch})...`);
-    await execFilePromise('git', ['fetch', 'origin'], { cwd: gitbookDir });
-    await execFilePromise('git', ['reset', '--hard', `origin/${currentBranch}`], { cwd: gitbookDir });
+    await gitExecutor.exec('git', ['fetch', 'origin'], { cwd: gitbookDir });
+    await gitExecutor.exec('git', ['reset', '--hard', `origin/${currentBranch}`], { cwd: gitbookDir });
     console.log(`[GitOps] 同步成功，工作區已更新至最新遠端 commit`);
   } catch (syncErr) {
     console.warn('[GitOps] ⚠️ 遠端同步失敗，降級使用本地暫存狀態:', syncErr.message);
@@ -135,11 +139,11 @@ export async function publishToGitBook({ videoId, summary, translatedParagraphs,
   // 執行 Gitops push 並回傳 GitBook 頁面的網址
   const gitbookPageUrl = `https://sunpochin.gitbook.io/social-dancing-notes/podcast-translations/${slug}`;
   try {
-    const { stdout: branchStdout } = await execFilePromise('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: gitbookDir });
+    const { stdout: branchStdout } = await gitExecutor.exec('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: gitbookDir });
     const currentBranch = branchStdout.trim();
-    await execFilePromise('git', ['add', '.'], { cwd: gitbookDir });
-    await execFilePromise('git', ['commit', '-m', `docs(podcast): add translation for ${title}`], { cwd: gitbookDir });
-    await execFilePromise('git', ['push', 'origin', currentBranch], { cwd: gitbookDir });
+    await gitExecutor.exec('git', ['add', '.'], { cwd: gitbookDir });
+    await gitExecutor.exec('git', ['commit', '-m', `docs(podcast): add translation for ${title}`], { cwd: gitbookDir });
+    await gitExecutor.exec('git', ['push', 'origin', currentBranch], { cwd: gitbookDir });
     return { success: true, message: `成功推送至 GitBook origin/${currentBranch} 分支！`, url: gitbookPageUrl };
   } catch (gitErr) {
     // 捕獲 nothing to commit 的警告
