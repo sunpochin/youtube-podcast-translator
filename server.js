@@ -432,6 +432,19 @@ app.post('/api/gitbook/publish', verifyGitBookPassword, async (req, res) => {
   const summaryPath = path.join(gitbookDir, 'SUMMARY.md');
 
   try {
+    // 在寫入本地檔案前，先拉取並重設為最新遠端狀態，避免多人併發或外部推送產生的 push conflict (Fast-Forward) 錯誤
+    let currentBranch = 'main';
+    try {
+      const { stdout: branchStdout } = await execFilePromise('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: gitbookDir });
+      currentBranch = branchStdout.trim();
+      console.log(`[GitOps] 正在從遠端同步 GitBook (${currentBranch})...`);
+      await execFilePromise('git', ['fetch', 'origin'], { cwd: gitbookDir });
+      await execFilePromise('git', ['reset', '--hard', `origin/${currentBranch}`], { cwd: gitbookDir });
+      console.log(`[GitOps] 同步成功，工作區已更新至最新遠端 commit`);
+    } catch (syncErr) {
+      console.warn('[GitOps] ⚠️ 遠端同步失敗，降級使用本地暫存狀態:', syncErr.message);
+    }
+
     // 確保 podcast-translations 目錄存在
     await fs.mkdir(podcastDir, { recursive: true });
 
