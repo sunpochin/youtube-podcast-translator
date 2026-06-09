@@ -65,7 +65,8 @@
 
 3. **明確的錯誤語意與 Demo 模式 (Error Semantics & Demo Mode Toggle)**：
    * 系統拒絕將真正的連線失敗偽裝成成功。當切換為**實體微服務 (Live)** 模式時，若微服務斷線，系統將明確回傳 `503 Service Unavailable` 並引導使用者檢查微服務狀態。
-   * 為了方便 Demo 展示，系統提供**模擬展示 (Demo Mock)** 模式，在微服務未開啟的情況下，仍能透過主服務記憶體完整模擬非同步佇列的狀態移轉與輪詢。
+   * 為了方便 Demo 展示，系統提供**模擬展示 (Demo Mock)** 模式，但模擬任務仍由 `social-post-service` 建立與追蹤；主服務不再用本地記憶體偽造 job lifecycle。若微服務未啟動，Demo 與 Live 都會明確失敗。
+   * **Live 模式不允許落回 MockStrategy**：如果下游仍以 `STRATEGY=mock` 執行，`social-post-service` 會回傳 `503`，避免把 demo mock 包裝成真實 Instagram 發佈。
 
 ---
 

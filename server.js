@@ -4,7 +4,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
-import crypto from 'crypto';
 import { YoutubeTranscript } from 'youtube-transcript';
 
 // 導入自訂中間件
@@ -329,9 +328,6 @@ app.post('/api/gitbook/publish', verifyGitBookPassword, async (req, res) => {
   }
 });
 
-// 儲存模擬任務進度，以利狀態輪詢展示
-const mockJobs = new Map();
-
 // 4. 將社交分享限動卡片同步發佈至社交發佈微服務
 app.post('/api/social/publish', async (req, res) => {
   const { title, url, image, mockMode } = req.body;
@@ -341,27 +337,9 @@ app.post('/api/social/publish', async (req, res) => {
 
   const caption = `🎙️ 我剛翻譯了一篇雙人社交舞 Podcast 筆記！\n\n標題：${title}\n閱讀全文對照：${url}\n\n#salsa #bachata #socialdancing #podcast`;
 
-  // 若使用者選擇 Demo 模擬模式
-  if (mockMode) {
-    const jobId = `mock-${crypto.randomUUID()}`;
-    mockJobs.set(jobId, {
-      jobId,
-      status: 'queued',
-      platforms: ['instagram'],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    });
-    console.log(`[Microservice Mock] 建立模擬任務: ${jobId}`);
-    return res.status(202).json({
-      success: true,
-      jobId,
-      mocked: true,
-      message: '模擬模式：已成功排入模擬發佈佇列！'
-    });
-  }
-
   try {
-    console.log('[Microservice] 正在將分享卡片遞送至 social-post-service...');
+    const mode = mockMode ? 'mock' : 'live';
+    console.log(`[Microservice] 正在將分享卡片遞送至 social-post-service (${mode})...`);
     const socialServiceUrl = process.env.SOCIAL_POST_SERVICE_URL || 'http://localhost:3012/api/posts';
     
     // 設定 5 秒超時，防止微服務斷線造成主服務掛起
@@ -371,7 +349,8 @@ app.post('/api/social/publish', async (req, res) => {
       body: JSON.stringify({
         caption,
         platforms: ['instagram'],
-        image
+        image,
+        mode
       }),
       signal: AbortSignal.timeout(5000)
     });
@@ -379,7 +358,14 @@ app.post('/api/social/publish', async (req, res) => {
     if (response.ok || response.status === 202) {
       const data = await response.json();
       console.log('[Microservice] 遞送成功！微服務回傳任務 ID:', data.jobId);
-      return res.status(202).json({ success: true, jobId: data.jobId, message: '已成功排入發佈微服務佇列！' });
+      return res.status(202).json({
+        success: true,
+        jobId: data.jobId,
+        mode: data.mode || mode,
+        strategy: data.strategy,
+        mocked: data.mode === 'mock' || mode === 'mock',
+        message: '已成功排入 social-post-service 發佈佇列！'
+      });
     }
     
     // 微服務有響應但回傳錯誤狀態碼（如 400 或 500），應回傳真實錯誤，不應降級模擬
@@ -399,26 +385,6 @@ app.post('/api/social/publish', async (req, res) => {
 // 5. 輪詢特定社交發佈任務狀態
 app.get('/api/social/status/:jobId', async (req, res) => {
   const { jobId } = req.params;
-
-  // 處理模擬任務
-  if (jobId.startsWith('mock-')) {
-    const job = mockJobs.get(jobId);
-    if (!job) {
-      return res.status(404).json({ error: `找不到模擬任務: ${jobId}` });
-    }
-
-    // 根據經歷時間計算模擬狀態轉換 (queued -> posting -> completed)
-    const elapsed = Date.now() - new Date(job.createdAt).getTime();
-    if (elapsed > 4000) {
-      job.status = 'completed';
-      job.results = [{ platform: 'instagram', success: true, platformPostId: `mock_ig_${jobId.slice(5, 11)}` }];
-    } else if (elapsed > 1500) {
-      job.status = 'posting';
-    }
-
-    job.updatedAt = new Date().toISOString();
-    return res.json(job);
-  }
 
   // 處理實體微服務任務狀態代理
   try {

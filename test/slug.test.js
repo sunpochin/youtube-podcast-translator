@@ -93,6 +93,21 @@ describe('Express API 路由整合測試', () => {
     });
   });
 
+  async function withFakeSocialPostService(handler, testFn) {
+    const fakeServer = http.createServer(handler);
+    await new Promise((resolve) => fakeServer.listen(0, '127.0.0.1', resolve));
+    const address = fakeServer.address();
+    const previousUrl = process.env.SOCIAL_POST_SERVICE_URL;
+    process.env.SOCIAL_POST_SERVICE_URL = `http://127.0.0.1:${address.port}/api/posts`;
+
+    try {
+      await testFn();
+    } finally {
+      process.env.SOCIAL_POST_SERVICE_URL = previousUrl;
+      await new Promise((resolve) => fakeServer.close(resolve));
+    }
+  }
+
   test('GET /api/connection-check - 應能識別本地請求', async () => {
     const res = await fetch(`${baseUrl}/api/connection-check`, {
       headers: { 'x-mock-ip': '127.0.0.1' }
@@ -219,29 +234,72 @@ describe('Express API 路由整合測試', () => {
     assert.ok(data.error.includes('無法連線至社交發佈微服務'));
   });
 
-  test('POST & GET /api/social/publish & status - Mock 模式應返回 202 並可正確輪詢狀態', async () => {
-    const publishRes = await fetch(`${baseUrl}/api/social/publish`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        title: '測試標題',
-        url: 'https://test-gitbook.com/123',
-        image: 'data:image/png;base64,mocked-base64',
-        mockMode: true // 指定 Mock 模式
-      })
+  test('POST & GET /api/social/publish & status - Mock 模式應代理到 social-post-service', async () => {
+    let receivedPublishBody = null;
+    await withFakeSocialPostService(async (req, res) => {
+      if (req.method === 'POST' && req.url === '/api/posts') {
+        let rawBody = '';
+        req.on('data', (chunk) => {
+          rawBody += chunk;
+        });
+        req.on('end', () => {
+          receivedPublishBody = JSON.parse(rawBody);
+          res.writeHead(202, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({
+            jobId: 'downstream-job-001',
+            status: 'queued',
+            mode: 'mock',
+            strategy: 'mock',
+            platforms: ['instagram'],
+            createdAt: new Date().toISOString()
+          }));
+        });
+        return;
+      }
+
+      if (req.method === 'GET' && req.url === '/api/posts/downstream-job-001') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          jobId: 'downstream-job-001',
+          status: 'completed',
+          mode: 'mock',
+          strategy: 'mock',
+          platforms: ['instagram'],
+          results: [{ platform: 'instagram', success: true, platformPostId: 'mock_instagram_001' }]
+        }));
+        return;
+      }
+
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not found' }));
+    }, async () => {
+      const publishRes = await fetch(`${baseUrl}/api/social/publish`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: '測試標題',
+          url: 'https://test-gitbook.com/123',
+          image: 'data:image/png;base64,mocked-base64',
+          mockMode: true // 指定 Mock 模式
+        })
+      });
+
+      assert.strictEqual(publishRes.status, 202);
+      const publishData = await publishRes.json();
+      assert.strictEqual(publishData.success, true);
+      assert.strictEqual(publishData.jobId, 'downstream-job-001');
+      assert.strictEqual(publishData.mocked, true);
+      assert.strictEqual(receivedPublishBody.mode, 'mock');
+      assert.deepStrictEqual(receivedPublishBody.platforms, ['instagram']);
+
+      // 測試輪詢狀態端點必須代理到下游微服務
+      const statusRes = await fetch(`${baseUrl}/api/social/status/${publishData.jobId}`);
+      assert.strictEqual(statusRes.status, 200);
+      const statusData = await statusRes.json();
+      assert.strictEqual(statusData.jobId, publishData.jobId);
+      assert.strictEqual(statusData.status, 'completed');
+      assert.strictEqual(statusData.strategy, 'mock');
     });
-
-    assert.strictEqual(publishRes.status, 202);
-    const publishData = await publishRes.json();
-    assert.strictEqual(publishData.success, true);
-    assert.ok(publishData.jobId.startsWith('mock-'));
-
-    // 測試輪詢狀態端點
-    const statusRes = await fetch(`${baseUrl}/api/social/status/${publishData.jobId}`);
-    assert.strictEqual(statusRes.status, 200);
-    const statusData = await statusRes.json();
-    assert.strictEqual(statusData.jobId, publishData.jobId);
-    assert.ok(['queued', 'posting', 'completed'].includes(statusData.status));
   });
 });
 

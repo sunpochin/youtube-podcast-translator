@@ -59,8 +59,9 @@ Reasoning:
 
 The social publish path now separates demo mock mode from live service mode:
 
-- demo mock mode returns `202` and simulates a job lifecycle for presentation
+- demo mock mode proxies to `social-post-service` with `mode: "mock"`; the downstream service owns the job lifecycle
 - live mode returns `503` when `social-post-service` is unreachable
+- live mode also returns `503` when the downstream service is running `MockStrategy`, because a mock strategy is not a real provider integration
 - downstream `400/500` errors are propagated instead of being wrapped as fake success
 
-This keeps the demo convenient without lying about distributed-system health.
+This keeps the demo convenient without lying about distributed-system health or hiding the microservice boundary.
