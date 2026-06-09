@@ -221,6 +221,41 @@ function App() {
     link.click()
   }
 
+  // 輔助函數：將 Base64 轉換為 File 物件以進行原生分享
+  const base64ToFile = async (base64Url, filename) => {
+    const res = await fetch(base64Url)
+    const blob = await res.blob()
+    return new File([blob], filename, { type: 'image/png' })
+  }
+
+  // 呼叫手機/裝置原生分享系統發佈圖卡到社群 (如 IG Story)
+  const handleNativeShare = async () => {
+    if (!publishMessage?.url || !videoId) return
+
+    try {
+      const base64Image = await generateShareCard(
+        publishTitle || videoTitle || 'Podcast 翻譯筆記',
+        publishMessage.url
+      )
+      const file = await base64ToFile(base64Image, `podcast-share-${videoId}.png`)
+
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `分享 Podcast 翻譯筆記：《${publishTitle || videoTitle}》`,
+          text: `我剛翻譯了一篇雙人社交舞 Podcast 筆記！閱讀全文：${publishMessage.url}`
+        })
+      } else {
+        // 不支援原生檔案分享時，直接降級為下載圖片
+        await handleDownloadImage()
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') return // 使用者主動取消分享，直接忽略
+      console.warn("裝置不支援原生分享或發生異常，降級至一般下載模式:", err.message)
+      await handleDownloadImage()
+    }
+  }
+
   // 渲染限動分享卡片並觸發瀏覽器下載
   const handleDownloadImage = async () => {
     if (!publishMessage?.url) return
@@ -682,10 +717,10 @@ function App() {
               </button>
               
               <button
-                onClick={handleDownloadImage}
+                onClick={handleNativeShare}
                 className="w-full bg-spotify-green hover:bg-spotify-green/90 text-black font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all text-sm"
               >
-                <span>📥 下載限動分享美圖 (PNG)</span>
+                <span>📲 一鍵分享至 IG 限動 / 下載卡片</span>
               </button>
 
               <button
