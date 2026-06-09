@@ -518,40 +518,25 @@ function App() {
             </button>
           </form>
 
-          {/* 密碼與引擎模式選擇 (僅在本地連線時顯示，外部瀏覽時直接隱藏) */}
+          {/* 引擎模式選擇 (僅在本地連線時顯示，外部瀏覽時直接隱藏) */}
           {isLocal && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t border-white/5">
-              {/* 密碼輸入 */}
-              <div className="flex flex-col gap-1.5 text-left">
-                <label className="text-xs font-semibold text-spotify-text">發佈/Gemini 驗證密碼 (使用 Ollama 翻譯免填)</label>
-                <input
-                  type="password"
-                  placeholder="雲端 Gemini 模式或發佈至 GitBook 時才需填寫..."
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="px-3 py-2.5 bg-black/40 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-spotify-green transition-all"
-                />
-              </div>
-              
-              {/* 引擎切換 */}
-              <div className="flex flex-col gap-1.5 text-left">
-                <label className="text-xs font-semibold text-spotify-text">翻譯大腦引擎</label>
-                <div className="flex gap-2 p-1 bg-black/40 rounded-lg border border-white/10">
-                  <button
-                    type="button"
-                    onClick={() => setTranslationMode('ollama')}
-                    className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${translationMode === 'ollama' ? 'bg-spotify-green text-black' : 'text-spotify-text hover:text-white'}`}
-                  >
-                    本地 Ollama (免費/預設)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTranslationMode('gemini')}
-                    className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${translationMode === 'gemini' ? 'bg-gradient-to-r from-violet-500 to-indigo-500 text-white font-bold' : 'text-spotify-text hover:text-white'}`}
-                  >
-                    雲端 Gemini (高品質/付費)
-                  </button>
-                </div>
+            <div className="flex flex-col gap-1.5 text-left mt-4 pt-4 border-t border-white/5 max-w-xs">
+              <label className="text-xs font-semibold text-spotify-text">翻譯大腦引擎</label>
+              <div className="flex gap-2 p-1 bg-black/40 rounded-lg border border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setTranslationMode('ollama')}
+                  className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${translationMode === 'ollama' ? 'bg-spotify-green text-black' : 'text-spotify-text hover:text-white'}`}
+                >
+                  本地 Ollama (免費/預設)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTranslationMode('gemini')}
+                  className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${translationMode === 'gemini' ? 'bg-gradient-to-r from-violet-500 to-indigo-500 text-white font-bold' : 'text-spotify-text hover:text-white'}`}
+                >
+                  雲端 Gemini (高品質/付費)
+                </button>
               </div>
             </div>
           )}

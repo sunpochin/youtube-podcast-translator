@@ -142,7 +142,7 @@ describe('Express API 路由整合測試', () => {
     assert.ok(data.error.includes('無效的字幕資料'));
   });
 
-  test('POST /api/translate - 非本地 IP 請求雲端模式但無驗證密碼時應返回 401', async () => {
+  test('POST /api/translate - 非本地 IP 請求雲端模式時，應回傳 200 並自動降級為 Ollama 處理', async () => {
     const res = await fetch(`${baseUrl}/api/translate`, {
       method: 'POST',
       headers: {
@@ -155,9 +155,27 @@ describe('Express API 路由整合測試', () => {
         mode: 'gemini'
       })
     });
-    assert.strictEqual(res.status, 401);
+    // 因為 SSE 啟動時會立即回傳 200 建立連接，後續才異步降級為 Ollama 推理
+    assert.strictEqual(res.status, 200);
+  });
+
+  test('POST /api/gitbook/publish - 非本地 IP 請求發佈時應返回 403 拒絕寫入', async () => {
+    const res = await fetch(`${baseUrl}/api/gitbook/publish`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-mock-ip': '192.168.1.50'
+      },
+      body: JSON.stringify({
+        videoId: 'video123',
+        summary: '摘要',
+        translatedParagraphs: [{ start: 0, end: 1, english: 'Hi', chinese: '嗨' }],
+        title: '標題'
+      })
+    });
+    assert.strictEqual(res.status, 403);
     const data = await res.json();
-    assert.ok(data.error.includes('訪問密碼無效'));
+    assert.ok(data.error.includes('安全限制'));
   });
 
   test('POST /api/gitbook/publish - 缺少必要發佈參數時應返回 400', async () => {

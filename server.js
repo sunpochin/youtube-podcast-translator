@@ -94,13 +94,12 @@ app.post('/api/translate', async (req, res) => {
     return res.status(400).json({ error: '無效的字幕資料' });
   }
 
-  const isGeminiMode = mode === 'gemini';
+  let isGeminiMode = mode === 'gemini';
 
-  // 外部 IP 如果想要切換成 Gemini 模式，強制校驗密碼保護錢包
+  // 外部 IP 如果想要切換成 Gemini 模式，強制降級為本機 Ollama 引擎以防消耗額度/曝露金鑰
   if (isGeminiMode && !isLocalRequest(req)) {
-    if (!password || password !== ACCESS_PASSWORD) {
-      return res.status(401).json({ error: '訪問密碼無效，外部用戶無法直接呼叫雲端付費 Gemini 引擎！' });
-    }
+    isGeminiMode = false;
+    console.log(`[安全性限制] 外部請求來自 ${req.ip || req.socket?.remoteAddress}，強制將翻譯引擎由 Gemini 切換為本機 Ollama。`);
   }
 
   // 設定 Server-Sent Events (SSE) 標頭
