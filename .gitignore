@@ -1,0 +1,11 @@
+# 忽略依賴套件資料夾
+node_modules/
+
+# 忽略本機環境變數配置（保護 API 金鑰安全）
+.env
+
+# 忽略前端編譯產物
+dashboard/dist/
+
+# 忽略系統檔案
+.DS_Store
