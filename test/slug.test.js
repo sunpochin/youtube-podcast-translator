@@ -306,9 +306,9 @@ describe('AI & GitBook Services 單元測試與 Mock 驗證', () => {
       assert.ok(fileContent.includes('<!-- gitbook-plugin-youtube-podcast-translator-auto-generated -->'));
       assert.ok(fileContent.includes('測試影片標題'));
 
-      // 驗證 SUMMARY.md 被正確更新
+      // 驗證 SUMMARY.md 被正確更新 (扁平無縮排格式)
       const summaryContent = await fs.readFile(path.join(sandboxDir, 'SUMMARY.md'), 'utf-8');
-      assert.ok(summaryContent.includes('  * [測試影片標題](podcast-translations/test-slug.md)'));
+      assert.ok(summaryContent.includes('* [測試影片標題](podcast-translations/test-slug.md)'));
 
       // 驗證 Git 命令執行的順序與完整性 (檢查程式有沒有照流程做事)
       const gitCmds = gitCalls.map(c => c.args[0] || c.args[1]);

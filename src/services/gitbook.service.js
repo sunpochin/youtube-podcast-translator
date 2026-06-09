@@ -113,9 +113,9 @@ export async function publishToGitBook({ videoId, summary, translatedParagraphs,
   // 寫入 Markdown 檔案
   await fs.writeFile(fullFilePath, mdContent, 'utf-8');
 
-  // 更新 SUMMARY.md
+  // 更新 SUMMARY.md (使用扁平無縮排格式以利手機閱讀)
   let summaryContent = await fs.readFile(summaryPath, 'utf-8');
-  const linkEntry = `  * [${title}](${relativeFilePath})`;
+  const linkEntry = `* [${title}](${relativeFilePath})`;
 
   if (!summaryContent.includes(relativeFilePath)) {
     const lines = summaryContent.split('\n');
