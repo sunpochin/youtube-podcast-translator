@@ -224,7 +224,16 @@ function App() {
             </div>
             <div>
               <h1 className="text-xl font-bold tracking-tight text-white m-0">Podcast 中文對照翻譯器</h1>
-              <p className="text-xs text-spotify-text m-0">輸入 YouTube 連結，AI 導讀秒級搞定</p>
+              <p className="text-xs text-spotify-text m-0">
+                輸入 YouTube 連結，AI 導讀
+                <del className="relative mx-1 inline-block no-underline opacity-70 after:absolute after:left-0 after:top-1/2 after:h-[1px] after:w-full after:-rotate-12 after:bg-current after:content-['']">
+                  秒級
+                </del>
+                <ins className="no-underline font-medium">
+                  小時級
+                </ins>
+                搞定
+              </p>
             </div>
           </div>
           <div className="text-xs text-white/40 font-mono">
