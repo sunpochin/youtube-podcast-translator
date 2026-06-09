@@ -329,7 +329,11 @@ app.post('/api/social/publish', async (req, res) => {
       return res.json({ success: true, jobId: data.jobId, message: '已成功排入發佈微服務佇列！' });
     }
     
-    throw new Error(`微服務回傳異常狀態: ${response.status}`);
+    // 微服務有響應但回傳錯誤狀態碼（如 400 或 500），應回傳真實錯誤，不應降級模擬
+    const errData = await response.json().catch(() => ({}));
+    const errMsg = errData.error || `微服務回傳異常狀態: ${response.status}`;
+    console.warn(`[Microservice] ⚠️ 微服務主動拒絕發佈: ${errMsg}`);
+    return res.status(response.status).json({ error: errMsg });
   } catch (err) {
     console.warn('[Microservice] ⚠️ 微服務連線失敗，降級為模擬成功模式:', err.message);
     // 降級退化方案：在微服務未開啟時，回傳模擬成功，確保前端展示不報錯
