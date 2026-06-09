@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Play, Search, CheckCircle, AlertTriangle, FileText, Download, Sparkles, Languages, Clock } from 'lucide-react'
+import { generateShareCard } from './utils/canvasRenderer'
 
 // 輔助函數：將秒數格式化為 mm:ss
 function formatTime(seconds) {
@@ -220,126 +221,23 @@ function App() {
     link.click()
   }
 
-  // 繪製圓角矩形 (輔助 Canvas 繪製卡片邊框)
-  const drawRoundRect = (ctx, x, y, width, height, radius) => {
-    ctx.beginPath()
-    ctx.moveTo(x + radius, y)
-    ctx.lineTo(x + width - radius, y)
-    ctx.quadraticCurveTo(x + width, y, x + width, y + radius)
-    ctx.lineTo(x + width, y + height - radius)
-    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height)
-    ctx.lineTo(x + radius, y + height)
-    ctx.quadraticCurveTo(x, y + height, x, y + height - radius)
-    ctx.lineTo(x, y + radius)
-    ctx.quadraticCurveTo(x, y, x + radius, y)
-    ctx.closePath()
-  }
-
-  // 文字自動折行 (輔助 Canvas 繪製標題)
-  const drawWrapText = (ctx, text, x, y, maxWidth, lineHeight) => {
-    const words = text.split('')
-    let line = ''
-    let currentY = y
-    const maxLines = 4
-    let lineCount = 0
-
-    for (let n = 0; n < words.length; n++) {
-      let testLine = line + words[n]
-      let metrics = ctx.measureText(testLine)
-      let testWidth = metrics.width
-      if (testWidth > maxWidth && n > 0) {
-        ctx.fillText(line, x, currentY)
-        line = words[n]
-        currentY += lineHeight
-        lineCount++
-        if (lineCount >= maxLines - 1) {
-          ctx.fillText(line + '...', x, currentY)
-          return
-        }
-      } else {
-        line = testLine
-      }
-    }
-    ctx.fillText(line, x, currentY)
-  }
-
   // 渲染限動分享卡片並觸發瀏覽器下載
-  const handleDownloadImage = () => {
+  const handleDownloadImage = async () => {
     if (!publishMessage?.url) return
 
-    const canvas = document.createElement('canvas')
-    canvas.width = 1080
-    canvas.height = 1920
-    const ctx = canvas.getContext('2d')
-
-    // 1. 繪製漸層背景
-    const grad = ctx.createLinearGradient(0, 0, 0, 1920)
-    grad.addColorStop(0, '#0a0a0a')
-    grad.addColorStop(1, '#181818')
-    ctx.fillStyle = grad
-    ctx.fillRect(0, 0, 1080, 1920)
-
-    // 2. 繪製裝飾圓形發光
-    ctx.fillStyle = 'rgba(29, 185, 84, 0.15)' // Spotify 綠發光
-    ctx.beginPath()
-    ctx.arc(540, 200, 400, 0, Math.PI * 2)
-    ctx.fill()
-
-    // 3. 繪製玻璃感主卡片容器
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.04)'
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)'
-    ctx.lineWidth = 4
-    drawRoundRect(ctx, 90, 250, 900, 1420, 40)
-    ctx.fill()
-    ctx.stroke()
-
-    // 4. 繪製頂部 Emoji 指示器
-    ctx.fillStyle = '#1DB954'
-    ctx.font = 'bold 70px system-ui, -apple-system, sans-serif'
-    ctx.textAlign = 'center'
-    ctx.fillText('🎙️', 540, 390)
-
-    // 5. 繪製標題 (支援多行文字折行)
-    ctx.fillStyle = '#FFFFFF'
-    ctx.font = 'bold 46px system-ui, -apple-system, sans-serif'
-    drawWrapText(ctx, publishTitle || videoTitle || 'Podcast 翻譯筆記', 540, 485, 720, 68)
-
-    // 6. 繪製中間裝飾分隔線
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)'
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.moveTo(180, 780)
-    ctx.lineTo(900, 780)
-    ctx.stroke()
-
-    // 7. 繪製主題背景字樣
-    ctx.fillStyle = '#1DB954'
-    ctx.font = 'bold 34px system-ui, -apple-system, sans-serif'
-    ctx.fillText('Salsa & Bachata Social Dancing', 540, 850)
-
-    // 8. 載入並繪製 QR Code (使用 api.qrserver.com 生成，啟用跨域標記防止 canvas 被污損)
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(publishMessage.url)}`
-    const qrImage = new Image()
-    qrImage.crossOrigin = 'anonymous'
-    qrImage.onload = () => {
-      ctx.drawImage(qrImage, 380, 930, 320, 320)
-
-      // 9. 繪製底部指引文字
-      ctx.fillStyle = '#a7a7a7'
-      ctx.font = '34px system-ui, -apple-system, sans-serif'
-      ctx.fillText('長按或截圖掃碼，閱讀中英雙語對照筆記', 540, 1320)
-
-      ctx.fillStyle = '#1DB954'
-      ctx.font = 'bold 38px system-ui, -apple-system, sans-serif'
-      ctx.fillText('SCAN TO READ', 540, 1395)
-
-      // 10. 將 Canvas 導出並下載
+    try {
+      const base64Data = await generateShareCard(
+        publishTitle || videoTitle || 'Podcast 翻譯筆記',
+        publishMessage.url
+      )
       const link = document.createElement('a')
       link.download = `podcast-share-${videoId}.png`
-      link.href = canvas.toDataURL('image/png')
+      link.href = base64Data
       link.click()
+    } catch (err) {
+      console.error('下載圖卡失敗:', err)
+      setError('無法渲染或下載分享圖卡')
     }
-    qrImage.src = qrUrl
   }
 
   // 渲染卡片並同步發送至社交發佈微服務 (social-post-service)
@@ -349,97 +247,38 @@ function App() {
     setSharingToMicroservice(true)
     setSocialShareMessage(null)
 
-    // 1. 建立 Canvas
-    const canvas = document.createElement('canvas')
-    canvas.width = 1080
-    canvas.height = 1920
-    const ctx = canvas.getContext('2d')
+    try {
+      const base64Image = await generateShareCard(
+        publishTitle || videoTitle || 'Podcast 翻譯筆記',
+        publishMessage.url
+      )
 
-    // 2. 繪製背景與卡片
-    const grad = ctx.createLinearGradient(0, 0, 0, 1920)
-    grad.addColorStop(0, '#0a0a0a')
-    grad.addColorStop(1, '#181818')
-    ctx.fillStyle = grad
-    ctx.fillRect(0, 0, 1080, 1920)
-
-    ctx.fillStyle = 'rgba(29, 185, 84, 0.15)'
-    ctx.beginPath()
-    ctx.arc(540, 200, 400, 0, Math.PI * 2)
-    ctx.fill()
-
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.04)'
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.08)'
-    ctx.lineWidth = 4
-    drawRoundRect(ctx, 90, 250, 900, 1420, 40)
-    ctx.fill()
-    ctx.stroke()
-
-    ctx.fillStyle = '#1DB954'
-    ctx.font = 'bold 70px system-ui, -apple-system, sans-serif'
-    ctx.textAlign = 'center'
-    ctx.fillText('🎙️', 540, 390)
-
-    ctx.fillStyle = '#FFFFFF'
-    ctx.font = 'bold 46px system-ui, -apple-system, sans-serif'
-    drawWrapText(ctx, publishTitle || videoTitle || 'Podcast 翻譯筆記', 540, 485, 720, 68)
-
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)'
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.moveTo(180, 780)
-    ctx.lineTo(900, 780)
-    ctx.stroke()
-
-    ctx.fillStyle = '#1DB954'
-    ctx.font = 'bold 34px system-ui, -apple-system, sans-serif'
-    ctx.fillText('Salsa & Bachata Social Dancing', 540, 850)
-
-    // 3. 載入並繪製 QR 碼，完成後再打 API (非同步機制)
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(publishMessage.url)}`
-    const qrImage = new Image()
-    qrImage.crossOrigin = 'anonymous'
-    qrImage.onload = async () => {
-      ctx.drawImage(qrImage, 380, 930, 320, 320)
-
-      ctx.fillStyle = '#a7a7a7'
-      ctx.font = '34px system-ui, -apple-system, sans-serif'
-      ctx.fillText('長按或截圖掃碼，閱讀中英雙語對照筆記', 540, 1320)
-
-      ctx.fillStyle = '#1DB954'
-      ctx.font = 'bold 38px system-ui, -apple-system, sans-serif'
-      ctx.fillText('SCAN TO READ', 540, 1395)
-
-      const base64Image = canvas.toDataURL('image/png')
-
-      try {
-        const res = await fetch('/api/social/publish', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            title: publishTitle,
-            url: publishMessage.url,
-            image: base64Image
-          })
+      const res = await fetch('/api/social/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: publishTitle,
+          url: publishMessage.url,
+          image: base64Image
         })
+      })
 
-        const data = await res.json()
-        if (res.ok) {
-          setSocialShareMessage({
-            success: true,
-            text: data.mocked 
-              ? '💡 成功！(本地社交發佈微服務未開啟，已自動進行 Mock 模擬發佈)' 
-              : `✅ 成功！已排入發佈微服務隊列 (Job ID: ${data.jobId})`
-          })
-        } else {
-          setSocialShareMessage({ success: false, text: data.error || '微服務發佈失敗' })
-        }
-      } catch (err) {
-        setSocialShareMessage({ success: false, text: '連線發佈微服務失敗' })
-      } finally {
-        setSharingToMicroservice(false)
+      const data = await res.json()
+      if (res.ok) {
+        setSocialShareMessage({
+          success: true,
+          text: data.mocked 
+            ? '💡 成功！(本地社交發佈微服務未開啟，已自動進行 Mock 模擬發佈)' 
+            : `✅ 成功！已排入發佈微服務隊列 (Job ID: ${data.jobId})`
+        })
+      } else {
+        setSocialShareMessage({ success: false, text: data.error || '微服務發佈失敗' })
       }
+    } catch (err) {
+      setSocialShareMessage({ success: false, text: '連線或渲染微服務圖卡失敗' })
+    } finally {
+      setSharingToMicroservice(false)
     }
-    qrImage.src = qrUrl
   }
 
   // 複製網址到剪貼簿的輔助函數
