@@ -8,6 +8,7 @@ import { generateShareCard } from './utils/canvasRenderer'
 import Header from './components/Header'
 import ShareModal from './components/ShareModal'
 import TranscriptPanel from './components/TranscriptPanel'
+import { samplePodcast } from './utils/sampleTranscripts'
 
 // 輔助函數：將秒數格式化為 mm:ss
 function formatTime(seconds) {
@@ -54,6 +55,7 @@ function App() {
   const [shareMode, setShareMode] = useState('semi_auto') // 分享模式：'auto' | 'semi_auto' | 'keyword'
   const [customShortUrl, setCustomShortUrl] = useState('') // 自訂短網址
   const [keyword, setKeyword] = useState('文章') // 私訊回覆關鍵字
+  const [isDemoFixture, setIsDemoFixture] = useState(false) // 標記是否使用示範 Fixture 數據
 
   // 初始化時檢測是否為本地連線
   useEffect(() => {
@@ -112,6 +114,7 @@ function App() {
     setTranslationProgress(0) // 重設進度
     setPublishTitle('')
     setPublishMessage(null)
+    setIsDemoFixture(false) // 清除範例 Fixture 狀態
     
     try {
       const res = await fetch('/api/transcript', {
@@ -132,6 +135,22 @@ function App() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // 載入 Demo 範例資料 (跳過爬蟲抓取，加速 Demo 流程)
+  const handleLoadDemoFixture = () => {
+    setError(null)
+    setLoading(false)
+    setYoutubeUrl('')
+    setVideoId(samplePodcast.videoId)
+    setVideoTitle(samplePodcast.title)
+    setTranscript(samplePodcast.transcript)
+    setSummary('')
+    setTranslatedParagraphs([])
+    setTranslationProgress(0)
+    setPublishTitle(samplePodcast.title)
+    setPublishMessage(null)
+    setIsDemoFixture(true) // 標記為範例 Fixture 數據
   }
 
   // 2. 呼叫 Gemini 進行中英翻譯與大綱生成 (透過 SSE 串流)
@@ -509,6 +528,17 @@ function App() {
             </button>
           </form>
 
+          {/* 範例字幕降級按鈕 (面試 Demo 專用，防止爬蟲被擋或無網路) */}
+          <div className="mt-4 pt-3 border-t border-white/5 flex flex-wrap gap-2 text-left">
+            <button
+              type="button"
+              onClick={handleLoadDemoFixture}
+              className="text-xs text-spotify-green hover:underline flex items-center gap-1.5 bg-white/5 hover:bg-white/10 px-3 py-1.5 rounded-lg border border-spotify-green/20 transition-all font-semibold"
+            >
+              <span>💡 載入 Demo 範例字幕（跳過 YouTube 抓取）</span>
+            </button>
+          </div>
+
           {/* 引擎模式選擇 (僅在本地連線時顯示，外部瀏覽時直接隱藏) */}
           {isLocal && (
             <div className="flex flex-col gap-1.5 text-left mt-4 pt-4 border-t border-white/5 max-w-xs">
@@ -564,8 +594,15 @@ function App() {
                       長度: {transcript.length > 0 ? formatTime(transcript[transcript.length - 1].start) : '0:00'}
                     </span>
                     <h3 className="font-semibold text-base text-white/90">{videoTitle || '字幕抓取成功！'}</h3>
-                    <p className="text-sm text-spotify-text mt-1">
-                      共抓取到 {transcript.length} 段字幕片段。現在可以使用 Gemini 將其翻譯為繁體中文對照，並分析核心大綱。
+                    {isDemoFixture && (
+                      <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-500/10 border border-amber-500/20 text-amber-400">
+                        <span>⚠️ 已載入 Demo 範例字幕，跳過即時 YouTube 抓取</span>
+                      </div>
+                    )}
+                    <p className="text-sm text-spotify-text mt-2">
+                      {isDemoFixture 
+                        ? `已載入精簡版範例逐字稿，共 ${transcript.length} 段。現在可以使用 Gemini/Ollama 進行翻譯與發佈。`
+                        : `共抓取到 ${transcript.length} 段字幕片段。現在可以使用 Gemini 將其翻譯為繁體中文對照，並分析核心大綱。`}
                     </p>
                   </div>
 
