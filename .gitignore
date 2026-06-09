@@ -9,3 +9,6 @@ dashboard/dist/
 
 # 忽略系統檔案
 .DS_Store
+
+# 忽略搶救工具箱資料夾
+toolbox/

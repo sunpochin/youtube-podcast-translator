@@ -16,7 +16,8 @@ if (process.env.GEMINI_API_KEY) {
 console.log('==================================');
 
 const app = express();
-app.use(express.json());
+// 提高 JSON 請求大小限制，避免長影片字數過多時引發 PayloadTooLargeError
+app.use(express.json({ limit: '10mb' }));
 
 const PORT = process.env.PORT || 3015;
 
