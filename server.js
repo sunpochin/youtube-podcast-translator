@@ -413,8 +413,8 @@ function generateSlug(text) {
     .replace(/\-\-+/g, '-');
 }
 
-// 輔助函式：產生 URL 友善的純英文/數字 Slug，防止中文被 GitBook 轉成拼音
-function generateCleanSlug(title, videoId) {
+// 降級退化方案：將字串轉為 URL 友善的純英文/數字 Slug
+function generateCleanSlugFallback(title, videoId) {
   // 1. 先嘗試只提取英文、數字字元來產生 Slug
   const cleanEnglish = title
     .toString()
@@ -441,6 +441,92 @@ function generateCleanSlug(title, videoId) {
   // 3. 最末端防護：直接使用影片 ID
   return videoId;
 }
+
+// 核心函式：透過 AI 將任何標題（特別是純中文標題）翻譯並轉換為乾淨的英文 URL Slug
+async function translateTitleToSlug(title, videoId) {
+  const prompt = `
+請將以下影片標題翻譯為英文，並轉換成 URL 友善的 Slug 格式。
+
+規範：
+1. 必須僅輸出 URL Slug：全部小寫，只包含英文字母、數字與連字號（-），例如 "weekly-phrase-theater-0602"。
+2. 不要包含任何引號、前導詞、說明或任何非 URL 字元。
+3. 如果標題本來就是英文，請直接將其轉為 Slug 格式。
+
+影片標題：
+"${title}"
+`;
+
+  try {
+    // 優先使用 Gemini 2.5 Flash 進行精確翻譯
+    if (process.env.GEMINI_API_KEY) {
+      console.log(`[Slug AI] 正在使用 Gemini 將標題翻譯為英文 Slug...`);
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+      });
+      const slugText = response.text ? response.text.trim().toLowerCase() : '';
+      const cleaned = slugText.replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-').replace(/^-+|-+$/g, '');
+      if (cleaned && cleaned.length > 2) {
+        console.log(`[Slug AI] Gemini 翻譯結果: ${cleaned}`);
+        return cleaned;
+      }
+    }
+  } catch (err) {
+    console.warn(`[Slug AI] ⚠️ Gemini 翻譯 Slug 失敗，降級使用本地大腦:`, err.message);
+  }
+
+  // 降級使用本地 Ollama 14b / 7b 進行翻譯
+  try {
+    console.log(`[Slug AI] 正在使用 Ollama (14b) 將標題翻譯為英文 Slug...`);
+    const response = await fetch('http://127.0.0.1:11434/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'qwen2.5:14b',
+        messages: [{ role: 'user', content: prompt }],
+        stream: false
+      })
+    });
+    if (response.ok) {
+      const data = await response.json();
+      const slugText = data.message.content.trim().toLowerCase();
+      const cleaned = slugText.replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-').replace(/^-+|-+$/g, '');
+      if (cleaned && cleaned.length > 2) {
+        console.log(`[Slug AI] Ollama 14b 翻譯結果: ${cleaned}`);
+        return cleaned;
+      }
+    }
+  } catch (err) {
+    console.warn(`[Slug AI] ⚠️ Ollama 14b 翻譯 Slug 失敗，嘗試 7b...`, err.message);
+    try {
+      const response = await fetch('http://127.0.0.1:11434/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'qwen2.5:7b',
+          messages: [{ role: 'user', content: prompt }],
+          stream: false
+        })
+      });
+      if (response.ok) {
+        const data = await response.json();
+        const slugText = data.message.content.trim().toLowerCase();
+        const cleaned = slugText.replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-').replace(/^-+|-+$/g, '');
+        if (cleaned && cleaned.length > 2) {
+          console.log(`[Slug AI] Ollama 7b 翻譯結果: ${cleaned}`);
+          return cleaned;
+        }
+      }
+    } catch (eInner) {
+      console.warn(`[Slug AI] ⚠️ Ollama 7b 翻譯 Slug 也失敗`, eInner.message);
+    }
+  }
+
+  // 若 AI 翻譯全部失敗，使用正則與影片 ID 退化方案
+  console.log(`[Slug AI] ⚠️ AI 翻譯 Slug 全部失敗，使用正則退化方案`);
+  return generateCleanSlugFallback(title, videoId);
+}
+
 
 // 輔助執行 shell 指令
 import { execFile } from 'child_process';
@@ -490,7 +576,7 @@ app.post('/api/gitbook/publish', verifyGitBookPassword, async (req, res) => {
     await fs.mkdir(podcastDir, { recursive: true });
 
     // 產生檔名
-    const slug = generateCleanSlug(title, videoId);
+    const slug = await translateTitleToSlug(title, videoId);
     const fileName = `${slug}.md`;
     const fullFilePath = path.join(podcastDir, fileName);
     const relativeFilePath = `podcast-translations/${fileName}`;
