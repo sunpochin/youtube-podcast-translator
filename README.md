@@ -32,7 +32,7 @@
             ┌────────────────┴────────────────┐
             ▼ (1. 渲染 9:16 Canvas 卡片)        ▼ (2. 呼叫發佈代理)
       [ Canvas 卡片引擎 ]                POST /api/social/publish
-     (含跨域安全 QR Code)                     │
+     (含本地生成 QR Code)                     │
                                              ▼
                                ┌──────────────────────────┐
                                │  youtube-translator 後端  │
@@ -131,7 +131,7 @@
 ## 🛠️ 技術架構
 
 *   **前端**：Vite + React 19 + Tailwind CSS + Lucide React 圖標。
-    *   **`/dashboard`** 目錄：包含響應式雙欄閱讀器、影片 Embedded 預覽、Markdown 筆記一鍵匯出，以及 **9:16 IG Story 卡片渲染器（自動生成指向 GitBook 網址的跨域安全 QR Code，並支持一鍵下載美圖與遞交微服務）**。
+    *   **`/dashboard`** 目錄：包含響應式雙欄閱讀器、影片 Embedded 預覽、Markdown 筆記一鍵匯出，以及 **9:16 IG Story 卡片渲染器（本地生成指向 GitBook 網址的 QR Code，不依賴外部 QR 圖片 API，並支持一鍵下載美圖與遞交微服務）**。
 *   **後端**：Express + `youtube-transcript` (秒級抓取英文字幕) + `@google/genai` (調用免費的 Gemini 2.5 Flash) / 本地 Ollama (預設快速模型：`qwen2.5:7b`，品質 fallback：`qwen2.5:14b`) + `social-post-service` 代理發佈路由。
 
 ### 本地 Ollama 模型調校

@@ -27,7 +27,7 @@ graph TD
         Safety -->|11. GitOps Sync| GitBookRepo[(GitBook 本地與遠端倉庫)]
     end
     
-    User -->|12. Generate 9:16 Canvas & QR| Canvas[HTML5 Canvas / QR API]
+    User -->|12. Generate 9:16 Canvas & QR| Canvas[HTML5 Canvas / Local QR Renderer]
     User -->|13. POST /api/social/publish| Express
     Express -->|14. Proxy Request| Microservice[(social-post-service 微服務: 3012)]
 ```
@@ -78,9 +78,9 @@ graph TD
     1.  **零依賴 HTML5 Canvas 圖片生成技術**：
         *   為了避免引入臃腫的 `html2canvas` 或 `puppeteer` 導致前端包體膨脹，我們在 React 中使用純 JavaScript 透過 HTML5 Canvas API 手寫了高效的卡片渲染引擎。
         *   引擎在背景渲染一張符合 IG 限動比例（9:16，1080x1920）的高解析度 PNG 圖片，包含 Podcast 中英文標題、圓角卡片磨砂效果（Glassmorphism）、影片封面指示圖與**動態 QR Code 二維碼**。
-    2.  **跨域安全防範 (Tainted Canvas Guard)**：
-        *   在 Canvas 繪製動態 QR Code 時，若直接繪製外部圖片會觸發瀏覽器的「畫布污染 (Tainted Canvas)」安全限制，導致無法導出 base64 圖片。
-        *   我們在載入 Image 時顯式設定 `qrImage.crossOrigin = 'anonymous'` 繞過此安全限制，成功導出 PNG。
+    2.  **本地 QR Code 生成 (Local QR Renderer)**：
+        *   早期版本透過外部 QR 圖片 API 產生二維碼，存在服務可用性、延遲、隱私與 Canvas CORS/Tainted Canvas 風險。
+        *   現在改用前端本地 `qrcode` 套件直接產生 QR canvas/data URL，分享卡渲染不再依賴第三方 QR 服務，也不會把 GitBook URL 傳給外部 QR API。
     3.  **微服務整合與明確錯誤語意 (Microservice Proxy with Honest Semantics)**：
         *   後端 Express 新增了 `POST /api/social/publish` 路由，作為 companion microservice `social-post-service` (port: 3012) 的發佈代理。
         *   設定 5 秒超時（`AbortSignal.timeout(5000)`）防止微服務當機掛起主伺服器。若連線失敗，Live 與 Demo 都會明確失敗，不再由主服務偽造任務成功。
