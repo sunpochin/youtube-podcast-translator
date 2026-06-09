@@ -3,7 +3,8 @@
 
 import test from 'node:test';
 import assert from 'node:assert';
-import { generateSlug, generateCleanSlugFallback, isLocalRequest } from '../server.js';
+import { generateSlug, generateCleanSlugFallback } from '../src/utils/helpers.js';
+import { isLocalRequest } from '../src/middleware/auth.js';
 
 test('generateSlug - 應能正確清理中文與空格符號', () => {
   const result = generateSlug('每週一句小劇場 【0602】');
@@ -30,14 +31,18 @@ test('generateCleanSlugFallback - 當標題為空時，應降級回退為影片 
   assert.strictEqual(result, 'video123');
 });
 
-test('isLocalRequest - 應能正確辨識本機 IP 與外網 IP', () => {
+test('isLocalRequest - 應能正確辨識本機 IP 與外網 IP，並支援模擬標頭', () => {
   const mockReq1 = { ip: '127.0.0.1', connection: {} };
   const mockReq2 = { ip: '::1', connection: {} };
   const mockReq3 = { ip: 'localhost', connection: {} };
   const mockReq4 = { ip: '192.168.1.50', connection: {} };
+  const mockReq5 = { headers: { 'x-mock-ip': '127.0.0.1' } };
+  const mockReq6 = { headers: { 'x-mock-ip': '192.168.1.50' } };
 
   assert.strictEqual(isLocalRequest(mockReq1), true);
   assert.strictEqual(isLocalRequest(mockReq2), true);
   assert.strictEqual(isLocalRequest(mockReq3), true);
   assert.strictEqual(isLocalRequest(mockReq4), false);
+  assert.strictEqual(isLocalRequest(mockReq5), true);
+  assert.strictEqual(isLocalRequest(mockReq6), false);
 });
