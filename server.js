@@ -89,7 +89,20 @@ app.post('/api/transcript', async (req, res) => {
 
 // 2. 呼叫 Gemini 2.5 Flash 或 Ollama 進行中英翻譯與分段摘要的 API (採用 SSE 串流傳輸)
 app.post('/api/translate', async (req, res) => {
-  const { transcript, videoId, mode, password, title } = req  // 設定 Server-Sent Events (SSE) 標頭
+  const { transcript, videoId, mode, password, title } = req.body;
+  if (!transcript || !Array.isArray(transcript)) {
+    return res.status(400).json({ error: '無效的字幕資料' });
+  }
+
+  let isGeminiMode = mode === 'gemini';
+
+  // 外部 IP 如果想要切換成 Gemini 模式，強制降級為本機 Ollama 引擎以防消耗額度/曝露金鑰
+  if (isGeminiMode && !isLocalRequest(req)) {
+    isGeminiMode = false;
+    console.log(`[安全性限制] 外部請求來自 ${req.ip || req.socket?.remoteAddress}，強制將翻譯引擎由 Gemini 切換為本機 Ollama。`);
+  }
+
+  // 設定 Server-Sent Events (SSE) 標頭
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
