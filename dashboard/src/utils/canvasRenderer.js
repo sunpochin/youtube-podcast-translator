@@ -22,19 +22,21 @@ function drawRoundRect(ctx, x, y, width, height, radius) {
  * 多行文字自動折行
  */
 function drawWrapText(ctx, text, x, y, maxWidth, lineHeight) {
-  const words = text.split('')
+  // 正則拆分：單個中文/日/韓字元、完整的英文單字/數值、以及其他標點/空白
+  const tokens = text.match(/[\u4e00-\u9fa5]|[a-zA-Z0-9']+|[^\u4e00-\u9fa5a-zA-Z0-9']/g) || []
   let line = ''
   let currentY = y
   const maxLines = 4
   let lineCount = 0
 
-  for (let n = 0; n < words.length; n++) {
-    let testLine = line + words[n]
-    let metrics = ctx.measureText(testLine)
-    let testWidth = metrics.width
+  for (let n = 0; n < tokens.length; n++) {
+    const token = tokens[n]
+    const testLine = line + token
+    const metrics = ctx.measureText(testLine)
+    const testWidth = metrics.width
     if (testWidth > maxWidth && n > 0) {
       ctx.fillText(line, x, currentY)
-      line = words[n]
+      line = token
       currentY += lineHeight
       lineCount++
       if (lineCount >= maxLines - 1) {
