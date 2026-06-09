@@ -142,7 +142,7 @@ describe('Express API 路由整合測試', () => {
     assert.ok(data.error.includes('無效的字幕資料'));
   });
 
-  test('POST /api/translate - 非本地 IP 請求雲端模式但無驗證密碼時應返回 401', async () => {
+  test('POST /api/translate - 非本地 IP 請求雲端模式時，應回傳 200 並自動降級為 Ollama 處理', async () => {
     const res = await fetch(`${baseUrl}/api/translate`, {
       method: 'POST',
       headers: {
@@ -155,9 +155,27 @@ describe('Express API 路由整合測試', () => {
         mode: 'gemini'
       })
     });
-    assert.strictEqual(res.status, 401);
+    // 因為 SSE 啟動時會立即回傳 200 建立連接，後續才異步降級為 Ollama 推理
+    assert.strictEqual(res.status, 200);
+  });
+
+  test('POST /api/gitbook/publish - 非本地 IP 請求發佈時應返回 403 拒絕寫入', async () => {
+    const res = await fetch(`${baseUrl}/api/gitbook/publish`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-mock-ip': '192.168.1.50'
+      },
+      body: JSON.stringify({
+        videoId: 'video123',
+        summary: '摘要',
+        translatedParagraphs: [{ start: 0, end: 1, english: 'Hi', chinese: '嗨' }],
+        title: '標題'
+      })
+    });
+    assert.strictEqual(res.status, 403);
     const data = await res.json();
-    assert.ok(data.error.includes('訪問密碼無效'));
+    assert.ok(data.error.includes('安全限制'));
   });
 
   test('POST /api/gitbook/publish - 缺少必要發佈參數時應返回 400', async () => {
@@ -169,6 +187,33 @@ describe('Express API 路由整合測試', () => {
     assert.strictEqual(res.status, 400);
     const data = await res.json();
     assert.ok(data.error.includes('缺少必要發佈參數'));
+  });
+
+  test('POST /api/social/publish - 缺少分享參數應返回 400', async () => {
+    const res = await fetch(`${baseUrl}/api/social/publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '測試' })
+    });
+    assert.strictEqual(res.status, 400);
+    const data = await res.json();
+    assert.ok(data.error.includes('缺少必要分享參數'));
+  });
+
+  test('POST /api/social/publish - 連線微服務失敗時應自動降級為模擬成功', async () => {
+    const res = await fetch(`${baseUrl}/api/social/publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: '測試標題',
+        url: 'https://test-gitbook.com/123',
+        image: 'data:image/png;base64,mocked-base64'
+      })
+    });
+    assert.strictEqual(res.status, 200);
+    const data = await res.json();
+    assert.strictEqual(data.success, true);
+    assert.ok(data.jobId || data.mocked, '應包含 jobId (微服務在線) 或 mocked 標記 (微服務離線)');
   });
 });
 

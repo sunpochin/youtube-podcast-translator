@@ -7,6 +7,53 @@ import { generateCleanSlugFallback } from '../utils/helpers.js';
 // 初始化 Gemini 智慧客戶端，優先使用 GEMINI_API_KEY
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
+// 全域影片級翻譯排隊調度器 (Video-level Translation Queue Scheduler)
+class TranslationQueueManager {
+  constructor() {
+    this.running = null; // 當前正在執行的任務 { id, videoId, title }
+    this.queue = []; // 等待中的任務陣列
+    this.jobCounter = 0;
+  }
+
+  enqueue(videoId, title, onWait, onStart) {
+    const jobId = ++this.jobCounter;
+    const job = { id: jobId, videoId, title, onStart, onWait };
+
+    if (!this.running) {
+      this.running = job;
+      onStart();
+    } else {
+      this.queue.push(job);
+      const position = this.queue.length;
+      onWait(position, this.running.title || this.running.videoId);
+    }
+
+    return jobId;
+  }
+
+  dequeue(jobId) {
+    if (this.running && this.running.id === jobId) {
+      this.running = null;
+      if (this.queue.length > 0) {
+        const nextJob = this.queue.shift();
+        this.running = nextJob;
+        nextJob.onStart();
+        // 更新其他排隊者的位置與當前正在執行的任務標題
+        this.queue.forEach((job, index) => {
+          job.onWait(index + 1, this.running.title || this.running.videoId);
+        });
+      }
+    } else {
+      this.queue = this.queue.filter(job => job.id !== jobId);
+      this.queue.forEach((job, index) => {
+        job.onWait(index + 1, this.running ? (this.running.title || this.running.videoId) : '其他任務');
+      });
+    }
+  }
+}
+
+export const translationQueueManager = new TranslationQueueManager();
+
 // 簡單的本地 Ollama Mutex Queue 排隊鎖，保護 Mac Mini CPU/GPU 不會因併發請求而載荷過大崩潰
 let ollamaQueuePromise = Promise.resolve();
 export async function enqueueOllamaTask(taskFn) {

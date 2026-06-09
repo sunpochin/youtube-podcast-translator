@@ -16,19 +16,14 @@ export function isLocalRequest(req) {
   return ip.includes('127.0.0.1') || ip.includes('::1') || ip.includes('localhost');
 }
 
-// 授權中間件：發佈到 GitBook 必須驗證密碼
+// 授權中間件：僅限本機發佈至 GitBook
 export function verifyGitBookPassword(req, res, next) {
-  const { password } = req.body;
-  
-  // 本地開發跳過密碼驗證
+  // 本地發佈允許
   if (isLocalRequest(req)) {
     return next();
   }
 
-  if (!password || password !== ACCESS_PASSWORD) {
-    return res.status(401).json({ error: '訪問密碼無效或未提供，外部用戶無權直接寫入 GitBook！' });
-  }
-  next();
+  return res.status(403).json({ error: '安全限制：僅限伺服器本機電腦之請求可以直接寫入 GitBook！' });
 }
 
 // IP 頻率限制 (每小時最多 2 次翻譯/發佈 API 呼叫，防範外部惡意洗流量)

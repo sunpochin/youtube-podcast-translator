@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Play, Search, CheckCircle, AlertTriangle, FileText, Download, Sparkles, Languages, Clock } from 'lucide-react'
+import { generateShareCard } from './utils/canvasRenderer'
 
 // 輔助函數：將秒數格式化為 mm:ss
 function formatTime(seconds) {
@@ -23,6 +24,7 @@ function App() {
   
   const [isTranslating, setIsTranslating] = useState(false)
   const [activeTab, setActiveTab] = useState('full') // 'full' | 'summary'
+  const [queueStatus, setQueueStatus] = useState(null) // { status: 'waiting' | 'running', position: number, currentTitle: string }
 
   // 密碼與引擎選擇狀態
   const [password, setPassword] = useState('')
@@ -33,6 +35,12 @@ function App() {
   const [publishTitle, setPublishTitle] = useState('')
   const [isPublishing, setIsPublishing] = useState(false)
   const [publishMessage, setPublishMessage] = useState(null)
+
+  // 社交分享與 IG Story 卡片狀態
+  const [showShareModal, setShowShareModal] = useState(false)
+  const [sharingToMicroservice, setSharingToMicroservice] = useState(false)
+  const [socialShareMessage, setSocialShareMessage] = useState(null)
+  const [copiedLink, setCopiedLink] = useState(false)
 
   // 初始化時檢測是否為本地連線
   useEffect(() => {
@@ -89,6 +97,7 @@ function App() {
     setTranslationProgress(0)
     setTranslatedParagraphs([])
     setSummary('')
+    setQueueStatus(null)
     
     try {
       const res = await fetch('/api/translate', {
@@ -127,7 +136,15 @@ function App() {
           if (cleanedLine.startsWith('data: ')) {
             try {
               const packet = JSON.parse(cleanedLine.substring(6))
-              if (packet.type === 'chunk') {
+              if (packet.type === 'queue_waiting') {
+                setQueueStatus({
+                  status: 'waiting',
+                  position: packet.position,
+                  currentTitle: packet.currentTitle
+                })
+              } else if (packet.type === 'queue_start') {
+                setQueueStatus({ status: 'running' })
+              } else if (packet.type === 'chunk') {
                 receivedParagraphs = [...receivedParagraphs, packet.chunk]
                 setTranslatedParagraphs(receivedParagraphs)
                 setTranslationProgress(packet.progress)
@@ -152,6 +169,7 @@ function App() {
       setError(err.message || 'AI 翻譯連線中斷，請重試')
     } finally {
       setIsTranslating(false)
+      setQueueStatus(null)
     }
   }
 
@@ -179,6 +197,7 @@ function App() {
       if (res.ok) {
         // 成功發佈時，儲存訊息與直達連結
         setPublishMessage({ success: true, text: data.message, url: data.url })
+        setShowShareModal(true) // 顯示限動分享卡片面板！
       } else {
         setPublishMessage({ success: false, text: data.error || '發佈失敗' })
       }
@@ -211,6 +230,109 @@ function App() {
     link.href = URL.createObjectURL(blob)
     link.download = `podcast-notes-${videoId}.md`
     link.click()
+  }
+
+  // 輔助函數：將 Base64 轉換為 File 物件以進行原生分享
+  const base64ToFile = async (base64Url, filename) => {
+    const res = await fetch(base64Url)
+    const blob = await res.blob()
+    return new File([blob], filename, { type: 'image/png' })
+  }
+
+  // 呼叫手機/裝置原生分享系統發佈圖卡到社群 (如 IG Story)
+  const handleNativeShare = async () => {
+    if (!publishMessage?.url || !videoId) return
+
+    try {
+      const base64Image = await generateShareCard(
+        publishTitle || videoTitle || 'Podcast 翻譯筆記',
+        publishMessage.url
+      )
+      const file = await base64ToFile(base64Image, `podcast-share-${videoId}.png`)
+
+      if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: `分享 Podcast 翻譯筆記：《${publishTitle || videoTitle}》`,
+          text: `我剛翻譯了一篇雙人社交舞 Podcast 筆記！閱讀全文：${publishMessage.url}`
+        })
+      } else {
+        // 不支援原生檔案分享時，直接降級為下載圖片
+        await handleDownloadImage()
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') return // 使用者主動取消分享，直接忽略
+      console.warn("裝置不支援原生分享或發生異常，降級至一般下載模式:", err.message)
+      await handleDownloadImage()
+    }
+  }
+
+  // 渲染限動分享卡片並觸發瀏覽器下載
+  const handleDownloadImage = async () => {
+    if (!publishMessage?.url) return
+
+    try {
+      const base64Data = await generateShareCard(
+        publishTitle || videoTitle || 'Podcast 翻譯筆記',
+        publishMessage.url
+      )
+      const link = document.createElement('a')
+      link.download = `podcast-share-${videoId}.png`
+      link.href = base64Data
+      link.click()
+    } catch (err) {
+      console.error('下載圖卡失敗:', err)
+      setError('無法渲染或下載分享圖卡')
+    }
+  }
+
+  // 渲染卡片並同步發送至社交發佈微服務 (social-post-service)
+  const handleShareToMicroservice = async () => {
+    if (!publishMessage?.url || !videoId) return
+
+    setSharingToMicroservice(true)
+    setSocialShareMessage(null)
+
+    try {
+      const base64Image = await generateShareCard(
+        publishTitle || videoTitle || 'Podcast 翻譯筆記',
+        publishMessage.url
+      )
+
+      const res = await fetch('/api/social/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: publishTitle || videoTitle || 'Podcast 翻譯筆記',
+          url: publishMessage.url,
+          image: base64Image
+        })
+      })
+
+      const data = await res.json()
+      if (res.ok) {
+        setSocialShareMessage({
+          success: true,
+          text: data.mocked 
+            ? '💡 成功！(本地社交發佈微服務未開啟，已自動進行 Mock 模擬發佈)' 
+            : `✅ 成功！已排入發佈微服務隊列 (Job ID: ${data.jobId})`
+        })
+      } else {
+        setSocialShareMessage({ success: false, text: data.error || '微服務發佈失敗' })
+      }
+    } catch (err) {
+      setSocialShareMessage({ success: false, text: '連線或渲染微服務圖卡失敗' })
+    } finally {
+      setSharingToMicroservice(false)
+    }
+  }
+
+  // 複製網址到剪貼簿的輔助函數
+  const handleCopyLink = () => {
+    if (!publishMessage?.url) return
+    navigator.clipboard.writeText(publishMessage.url)
+    setCopiedLink(true)
+    setTimeout(() => setCopiedLink(false), 2000)
   }
 
   return (
@@ -281,40 +403,25 @@ function App() {
             </button>
           </form>
 
-          {/* 密碼與引擎模式選擇 (僅在本地連線時顯示，外部瀏覽時直接隱藏) */}
+          {/* 引擎模式選擇 (僅在本地連線時顯示，外部瀏覽時直接隱藏) */}
           {isLocal && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t border-white/5">
-              {/* 密碼輸入 */}
-              <div className="flex flex-col gap-1.5 text-left">
-                <label className="text-xs font-semibold text-spotify-text">發佈/Gemini 驗證密碼 (使用 Ollama 翻譯免填)</label>
-                <input
-                  type="password"
-                  placeholder="雲端 Gemini 模式或發佈至 GitBook 時才需填寫..."
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="px-3 py-2.5 bg-black/40 border border-white/10 rounded-lg text-sm text-white focus:outline-none focus:border-spotify-green transition-all"
-                />
-              </div>
-              
-              {/* 引擎切換 */}
-              <div className="flex flex-col gap-1.5 text-left">
-                <label className="text-xs font-semibold text-spotify-text">翻譯大腦引擎</label>
-                <div className="flex gap-2 p-1 bg-black/40 rounded-lg border border-white/10">
-                  <button
-                    type="button"
-                    onClick={() => setTranslationMode('ollama')}
-                    className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${translationMode === 'ollama' ? 'bg-spotify-green text-black' : 'text-spotify-text hover:text-white'}`}
-                  >
-                    本地 Ollama (免費/預設)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setTranslationMode('gemini')}
-                    className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${translationMode === 'gemini' ? 'bg-gradient-to-r from-violet-500 to-indigo-500 text-white font-bold' : 'text-spotify-text hover:text-white'}`}
-                  >
-                    雲端 Gemini (高品質/付費)
-                  </button>
-                </div>
+            <div className="flex flex-col gap-1.5 text-left mt-4 pt-4 border-t border-white/5 max-w-xs">
+              <label className="text-xs font-semibold text-spotify-text">翻譯大腦引擎</label>
+              <div className="flex gap-2 p-1 bg-black/40 rounded-lg border border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setTranslationMode('ollama')}
+                  className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${translationMode === 'ollama' ? 'bg-spotify-green text-black' : 'text-spotify-text hover:text-white'}`}
+                >
+                  本地 Ollama (免費/預設)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTranslationMode('gemini')}
+                  className={`flex-1 py-1.5 rounded-md text-xs font-semibold transition-all ${translationMode === 'gemini' ? 'bg-gradient-to-r from-violet-500 to-indigo-500 text-white font-bold' : 'text-spotify-text hover:text-white'}`}
+                >
+                  雲端 Gemini (高品質/付費)
+                </button>
               </div>
             </div>
           )}
@@ -359,7 +466,30 @@ function App() {
                   <div className="mt-6 pt-4 border-t border-white/5">
                     {translatedParagraphs.length === 0 || isTranslating ? (
                       <div className="flex flex-col gap-3">
-                        {isTranslating && (
+                        {/* 排隊狀態顯示器 */}
+                        {queueStatus && queueStatus.status === 'waiting' && (
+                          <div className="bg-amber-950/40 border border-amber-500/30 text-amber-400 p-4 rounded-xl text-sm text-left flex flex-col gap-1.5 animate-pulse">
+                            <div className="font-semibold flex items-center gap-1.5">
+                              <Clock size={16} />
+                              <span>📞 客服語音：前方有任務正在處理</span>
+                            </div>
+                            <div className="text-xs leading-relaxed text-amber-300/90">
+                              當前處理中：<span className="text-white font-medium line-clamp-1">{queueStatus.currentTitle}</span>
+                              您目前排在第 <strong className="text-white font-bold text-sm bg-white/10 px-1.5 py-0.5 rounded">{queueStatus.position}</strong> 位，請稍候，完成後將自動開始您的翻譯...
+                            </div>
+                          </div>
+                        )}
+
+                        {queueStatus && queueStatus.status === 'running' && (
+                          <div className="bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 p-4 rounded-xl text-sm text-left flex flex-col gap-1.5">
+                            <div className="font-semibold flex items-center gap-1.5">
+                              <Sparkles size={16} className="animate-pulse text-spotify-green" />
+                              <span>🎉 輪到你了！正在啟動翻譯服務...</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {isTranslating && (!queueStatus || queueStatus.status === 'running') && (
                           <div className="w-full text-left">
                             <div className="flex justify-between text-xs text-spotify-text mb-1.5">
                               <span>翻譯進度</span>
@@ -381,7 +511,11 @@ function App() {
                           {isTranslating ? (
                             <>
                               <div className="animate-spin rounded-full h-5 w-5 border-2 border-black border-t-transparent"></div>
-                              <span>AI 雙語對照翻譯中... ({translationProgress}%)</span>
+                              <span>
+                                {queueStatus && queueStatus.status === 'waiting' 
+                                  ? `排隊中 (第 ${queueStatus.position} 位)...` 
+                                  : `AI 雙語對照翻譯中... (${translationProgress}%)`}
+                              </span>
                             </>
                           ) : (
                             <>
@@ -554,6 +688,107 @@ function App() {
 
           </div>
         )}
+      {/* 🚀 IG 限動卡片與微服務分享彈窗 */}
+      {showShareModal && publishMessage?.success && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[100] flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-spotify-card border border-white/10 rounded-3xl max-w-md w-full p-6 shadow-2xl relative flex flex-col gap-6 my-8 animate-fade-in text-center">
+            
+            {/* 關閉按鈕 */}
+            <button
+              onClick={() => {
+                setShowShareModal(false)
+                setSocialShareMessage(null)
+              }}
+              className="absolute top-4 right-4 text-white/40 hover:text-white bg-white/5 hover:bg-white/10 p-1.5 rounded-full transition-all text-sm font-semibold"
+            >
+              ✕
+            </button>
+
+            <div>
+              <h3 className="text-xl font-bold text-white flex items-center justify-center gap-2">
+                <Sparkles className="text-spotify-green animate-pulse" size={20} />
+                <span>發佈成功！產生成果卡片</span>
+              </h3>
+              <p className="text-xs text-spotify-text mt-1">
+                下方為您的專屬 IG Story 9:16 分享美圖與掃描二維碼
+              </p>
+            </div>
+
+            {/* 卡片預覽 (9:16) */}
+            <div className="aspect-[9/16] w-full max-w-[250px] mx-auto bg-gradient-to-b from-[#0a0a0a] to-[#181818] rounded-2xl border border-white/10 p-4 relative flex flex-col justify-between shadow-2xl overflow-hidden text-center shrink-0 select-none">
+              {/* 發光裝飾背景 */}
+              <div className="absolute top-[-50px] left-[-50px] w-64 h-64 bg-spotify-green/10 rounded-full filter blur-3xl pointer-events-none"></div>
+              
+              <div className="border border-white/5 bg-white/[0.03] rounded-xl p-3.5 flex-1 flex flex-col justify-between items-center text-center">
+                <div className="text-2xl mt-1">🎙️</div>
+                <div className="text-xs font-bold line-clamp-4 leading-normal my-2 px-1 text-white/95">
+                  {publishTitle || videoTitle || 'Podcast 翻譯筆記'}
+                </div>
+                <div className="w-12 border-t border-white/10 my-1"></div>
+                <div className="text-[9px] text-spotify-green font-bold tracking-wider uppercase">
+                  Salsa & Bachata Dance
+                </div>
+                
+                {/* 二維碼圖片 */}
+                <img
+                  src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(publishMessage.url)}`}
+                  alt="QR Code"
+                  className="w-24 h-24 bg-white p-1 rounded-lg shadow-md my-2"
+                />
+                
+                <div className="text-[8px] text-white/40 leading-snug">
+                  長按或截圖掃碼，閱讀中英雙語對照筆記
+                </div>
+                <div className="text-[8px] text-spotify-green font-bold mt-1 tracking-widest">
+                  SCAN TO READ
+                </div>
+              </div>
+            </div>
+
+            {/* 控制按鈕組 */}
+            <div className="flex flex-col gap-3">
+              <button
+                onClick={handleCopyLink}
+                className="w-full bg-white/10 hover:bg-white/15 text-white font-semibold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all border border-white/5 text-sm"
+              >
+                <span>{copiedLink ? '✓ 已複製連結！' : '🔗 複製文章連結'}</span>
+              </button>
+              
+              <button
+                onClick={handleNativeShare}
+                className="w-full bg-spotify-green hover:bg-spotify-green/90 text-black font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all text-sm"
+              >
+                <span>📲 一鍵分享至 IG 限動 / 下載卡片</span>
+              </button>
+
+              <button
+                onClick={handleShareToMicroservice}
+                disabled={sharingToMicroservice}
+                className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 transition-all text-sm disabled:opacity-50"
+              >
+                {sharingToMicroservice ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                    <span>傳送中...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles size={16} />
+                    <span>🚀 遞交至發佈微服務</span>
+                  </>
+                )}
+              </button>
+
+              {socialShareMessage && (
+                <div className={`p-3 rounded-xl text-xs border text-left leading-relaxed ${socialShareMessage.success ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-400' : 'bg-red-950/40 border-red-500/30 text-red-400'}`}>
+                  {socialShareMessage.text}
+                </div>
+              )}
+            </div>
+
+          </div>
+        </div>
+      )}
       </main>
     </div>
   )
