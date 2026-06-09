@@ -454,8 +454,40 @@ app.post('/api/gitbook/publish', verifyGitBookPassword, async (req, res) => {
     const fullFilePath = path.join(podcastDir, fileName);
     const relativeFilePath = `podcast-translations/${fileName}`;
 
+    // 確保寫入路徑嚴格限制在 podcast-translations 目錄下，防止路徑穿越攻擊
+    const relativePathToCheck = path.relative(podcastDir, fullFilePath);
+    if (relativePathToCheck.startsWith('..') || path.isAbsolute(relativePathToCheck)) {
+      return res.status(400).json({ error: '非法檔案路徑，發佈路徑必須限制在 podcast-translations 目錄內！' });
+    }
+
+    const SIGNATURE_MARKER = '<!-- gitbook-plugin-youtube-podcast-translator-auto-generated -->';
+
+    // 嚴格防止覆蓋手寫 GitBook：如果檔案已存在，進行安全檢查
+    let fileExists = false;
+    try {
+      await fs.access(fullFilePath);
+      fileExists = true;
+    } catch (e) {
+      fileExists = false;
+    }
+
+    if (fileExists) {
+      const existingContent = await fs.readFile(fullFilePath, 'utf-8');
+      // 1. 如果原有檔案沒有印章，判定為主人的手寫檔案，絕對禁止覆蓋
+      if (!existingContent.includes(SIGNATURE_MARKER)) {
+        return res.status(409).json({ error: `發佈失敗：檔案 ${fileName} 已存在，且沒有自動產生印章。這可能是您手動撰寫的文章，為保護您的手稿，已拒絕寫入。` });
+      }
+
+      // 2. 即使有印章，如果請求來自外部 (非本機 IP)，也拒絕覆蓋，防止外人洗掉內容
+      if (!isLocalRequest(req)) {
+        return res.status(409).json({ error: `發佈失敗：檔案 ${fileName} 已經存在。為防止覆蓋現有內容，非本地發佈端點拒絕覆蓋現有的自動生成檔案。` });
+      }
+    }
+
     // 組裝 Markdown 內容 (提供新分頁開啟連結，並嵌入 YouTube 播放器以利在手機上邊聽邊看)
-    let mdContent = `# 🎙️ ${title}\n\n`;
+    // 第一行印上自動產生的印章，以便後續辨識
+    let mdContent = `${SIGNATURE_MARKER}\n`;
+    mdContent += `# 🎙️ ${title}\n\n`;
     mdContent += `> 影片連結: <a href="https://youtube.com/watch?v=${videoId}" target="_blank" rel="noopener noreferrer">YouTube 網頁連結 (新分頁開啟)</a>\n\n`;
     mdContent += `### 影片嵌入觀看 (可邊放邊對照)\n`;
     mdContent += `<iframe width="100%" height="400" src="https://www.youtube.com/embed/${videoId}" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>\n\n`;
