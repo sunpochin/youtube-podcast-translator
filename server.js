@@ -11,7 +11,7 @@ import { YoutubeTranscript } from 'youtube-transcript';
 import { isLocalRequest, verifyGitBookPassword, apiLimiter } from './src/middleware/auth.js';
 
 // 導入 AI 翻譯服務與實體
-import { ai, enqueueOllamaTask, ollamaModelConfig, translateWithOllama, summarizeWithOllama, translationQueueManager } from './src/services/ai.service.js';
+import { ai, enqueueOllamaTask, normalizeTraditionalChineseOutput, ollamaModelConfig, translateWithOllama, summarizeWithOllama, translationQueueManager } from './src/services/ai.service.js';
 
 // 導入 GitBook 發佈服務
 import { publishToGitBook } from './src/services/gitbook.service.js';
@@ -149,6 +149,7 @@ app.post('/api/translate', async (req, res) => {
 
 翻譯規範：
 1. 輸出格式必須僅包含翻譯後的繁體中文，不要包含任何前導詞、說明或引號。
+2. "Salsa" 一律翻譯為「Salsa」或「莎莎舞」，絕對不要翻譯成「桑巴舞」、「沙薩」或簡體字。
 
 影片標題：
 "${title}"
@@ -159,7 +160,7 @@ app.post('/api/translate', async (req, res) => {
             model: 'gemini-2.5-flash',
             contents: titlePrompt,
           });
-          translatedTitle = titleResponse.text ? titleResponse.text.trim() : '';
+          translatedTitle = titleResponse.text ? normalizeTraditionalChineseOutput(titleResponse.text) : '';
         } else {
           try {
             translatedTitle = await enqueueOllamaTask(() => translateWithOllama(title, ollamaModelConfig.translate));
@@ -173,7 +174,7 @@ app.post('/api/translate', async (req, res) => {
         }
 
         if (translatedTitle) {
-          translatedTitle = translatedTitle.replace(/^["'「」（(]+|["'「」（)]+$/g, '').trim();
+          translatedTitle = normalizeTraditionalChineseOutput(translatedTitle.replace(/^["'「」（(]+|["'「」（)]+$/g, ''));
           finalTitle = `${translatedTitle} - ${title}`;
         } else {
           finalTitle = title;
@@ -207,6 +208,9 @@ app.post('/api/translate', async (req, res) => {
 翻譯規範：
 1. 請保持文筆自然、感性且流暢，不要生硬地字對字翻譯。
 2. 對於專業領域名詞，請務必遵循社交雙人舞領域的慣用術語。例如：
+   - "Salsa" 一律翻譯為「Salsa」或「莎莎舞」，絕對不要翻譯成「桑巴舞」、「沙薩」或簡體字。
+   - "Bachata" 一律翻譯為「Bachata」或「巴恰塔」。
+   - "Kizomba" 一律保留為「Kizomba」。
    - "congress" 或 "congresses" 指的是「舞蹈節」或「舞蹈大會」，絕對不要翻譯成「國會」或「議會」。
    - "social" 或 "socials" 指的是「舞會」或「社交舞會」，而非「社會」或「社交的」。
    - "lineup" 或 "lineups" 指的是「師資陣容」或「演出陣容」。
@@ -223,7 +227,7 @@ app.post('/api/translate', async (req, res) => {
             model: 'gemini-2.5-flash',
             contents: prompt,
           });
-          chineseText = response.text ? response.text.trim() : '（翻譯失敗）';
+          chineseText = response.text ? normalizeTraditionalChineseOutput(response.text) : '（翻譯失敗）';
         } else {
           try {
             chineseText = await enqueueOllamaTask(() => translateWithOllama(englishText, ollamaModelConfig.translate));
@@ -260,6 +264,12 @@ app.post('/api/translate', async (req, res) => {
 1. 這一集 Podcast 的核心主旨與探討內容。
 2. 列出 3-4 個本集最值得關注的關鍵看點與精華摘要。
 
+術語規範：
+- "Salsa" 一律寫成「Salsa」或「莎莎舞」，絕對不要寫成「桑巴舞」、「沙薩」或簡體字。
+- "Bachata" 一律寫成「Bachata」或「巴恰塔」。
+- "Kizomba" 一律保留為「Kizomba」。
+- "social" 或 "socials" 在舞蹈脈絡下指「舞會」或「社交舞會」。
+
 Podcast 內容：
 "${fullEnglishText}"
 `;
@@ -267,7 +277,7 @@ Podcast 內容：
             model: 'gemini-2.5-flash',
             contents: summaryPrompt,
           });
-          summaryText = summaryResponse.text ? summaryResponse.text.trim() : '無法生成摘要。';
+          summaryText = summaryResponse.text ? normalizeTraditionalChineseOutput(summaryResponse.text) : '無法生成摘要。';
         } else {
           try {
             summaryText = await enqueueOllamaTask(() => summarizeWithOllama(fullEnglishText, ollamaModelConfig.summary));

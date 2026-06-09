@@ -9,12 +9,60 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 export const ollamaModelConfig = {
   translate: process.env.OLLAMA_TRANSLATE_MODEL || 'qwen2.5:7b',
-  translateFallback: process.env.OLLAMA_TRANSLATE_FALLBACK_MODEL || 'qwen3:4b',
-  summary: process.env.OLLAMA_SUMMARY_MODEL || 'qwen3:4b',
-  summaryFallback: process.env.OLLAMA_SUMMARY_FALLBACK_MODEL || 'qwen2.5:7b',
-  slug: process.env.OLLAMA_SLUG_MODEL || 'qwen3:4b',
-  slugFallback: process.env.OLLAMA_SLUG_FALLBACK_MODEL || 'qwen2.5:7b'
+  translateFallback: process.env.OLLAMA_TRANSLATE_FALLBACK_MODEL || 'qwen2.5:14b',
+  summary: process.env.OLLAMA_SUMMARY_MODEL || 'qwen2.5:7b',
+  summaryFallback: process.env.OLLAMA_SUMMARY_FALLBACK_MODEL || 'qwen2.5:14b',
+  slug: process.env.OLLAMA_SLUG_MODEL || 'qwen2.5:7b',
+  slugFallback: process.env.OLLAMA_SLUG_FALLBACK_MODEL || 'qwen2.5:14b'
 };
+
+const zhNormalizationMap = new Map([
+  ['桑巴舞', '莎莎舞'],
+  ['沙薩舞', '莎莎舞'],
+  ['沙薩', 'Salsa'],
+  ['薩爾萨', 'Salsa'],
+  ['薩爾薩', 'Salsa'],
+  ['里', '裡'],
+  ['里的', '裡的'],
+  ['里面', '裡面'],
+  ['发', '發'],
+  ['体', '體'],
+  ['个', '個'],
+  ['这', '這'],
+  ['种', '種'],
+  ['为', '為'],
+  ['与', '與'],
+  ['后', '後'],
+  ['传', '傳'],
+  ['导', '導'],
+  ['众', '眾'],
+  ['会', '會'],
+  ['议', '議'],
+  ['师', '師'],
+  ['乐', '樂'],
+  ['习', '習'],
+  ['让', '讓'],
+  ['该', '該'],
+  ['对', '對'],
+  ['说', '說'],
+  ['归', '歸'],
+  ['类', '類'],
+  ['气', '氣'],
+  ['处', '處'],
+  ['数', '數'],
+  ['网', '網'],
+  ['页', '頁'],
+  ['视', '視'],
+  ['频', '頻']
+]);
+
+export function normalizeTraditionalChineseOutput(text = '') {
+  let normalized = String(text);
+  for (const [source, target] of zhNormalizationMap.entries()) {
+    normalized = normalized.replaceAll(source, target);
+  }
+  return normalized.trim();
+}
 
 // 全域影片級翻譯排隊調度器 (Video-level Translation Queue Scheduler)
 class TranslationQueueManager {
@@ -84,6 +132,9 @@ export async function translateWithOllama(englishText, modelName = ollamaModelCo
 翻譯規範：
 1. 請保持文筆自然、感性且流暢，不要生硬地字對字翻譯。
 2. 對於專業領域名詞，請務必遵循社交雙人舞領域的慣用術語。例如：
+   - "Salsa" 一律翻譯為「Salsa」或「莎莎舞」，絕對不要翻譯成「桑巴舞」、「沙薩」或簡體字。
+   - "Bachata" 一律翻譯為「Bachata」或「巴恰塔」。
+   - "Kizomba" 一律保留為「Kizomba」。
    - "congress" 或 "congresses" 指的是「舞蹈節」或「舞蹈大會」，絕對不要翻譯成「國會」或「議會」。
    - "social" 或 "socials" 指的是「舞會」或「社交舞會」，而非「社會」或「社交的」。
    - "lineup" 或 "lineups" 指的是「師資陣容」或「演出陣容」。
@@ -113,7 +164,7 @@ export async function translateWithOllama(englishText, modelName = ollamaModelCo
       throw new Error(`Ollama 響應失敗: ${response.status}`);
     }
     const data = await response.json();
-    return data.message.content.trim();
+    return normalizeTraditionalChineseOutput(data.message.content);
   } catch (err) {
     console.warn(`[Ollama] ⚠️ 本地 Ollama 呼叫失敗，將降級或報錯:`, err.message);
     throw err;
@@ -126,6 +177,12 @@ export async function summarizeWithOllama(fullEnglishText, modelName = ollamaMod
 請閱讀以下 Podcast 前段內容，並以繁體中文整理出：
 1. 這一集 Podcast 的核心主旨與探討內容。
 2. 列出 3-4 個本集最值得關注的關鍵看點與精華摘要。
+
+術語規範：
+- "Salsa" 一律寫成「Salsa」或「莎莎舞」，絕對不要寫成「桑巴舞」、「沙薩」或簡體字。
+- "Bachata" 一律寫成「Bachata」或「巴恰塔」。
+- "Kizomba" 一律保留為「Kizomba」。
+- "social" 或 "socials" 在舞蹈脈絡下指「舞會」或「社交舞會」。
 
 Podcast 內容：
 "${fullEnglishText}"
@@ -148,7 +205,7 @@ Podcast 內容：
       throw new Error(`Ollama 摘要響應失敗: ${response.status}`);
     }
     const data = await response.json();
-    return data.message.content.trim();
+    return normalizeTraditionalChineseOutput(data.message.content);
   } catch (err) {
     console.warn(`[Ollama] ⚠️ 本地 Ollama 摘要呼叫失敗:`, err.message);
     throw err;

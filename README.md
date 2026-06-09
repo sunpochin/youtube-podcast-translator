@@ -131,7 +131,7 @@
 
 *   **前端**：Vite + React 19 + Tailwind CSS + Lucide React 圖標。
     *   **`/dashboard`** 目錄：包含響應式雙欄閱讀器、影片 Embedded 預覽、Markdown 筆記一鍵匯出，以及 **9:16 IG Story 卡片渲染器（自動生成指向 GitBook 網址的跨域安全 QR Code，並支持一鍵下載美圖與遞交微服務）**。
-*   **後端**：Express + `youtube-transcript` (秒級抓取英文字幕) + `@google/genai` (調用免費的 Gemini 2.5 Flash) / 本地 Ollama (預設快速模型：翻譯 `qwen2.5:7b`、摘要與 Slug `qwen3:4b`) + `social-post-service` 代理發佈路由。
+*   **後端**：Express + `youtube-transcript` (秒級抓取英文字幕) + `@google/genai` (調用免費的 Gemini 2.5 Flash) / 本地 Ollama (預設快速模型：`qwen2.5:7b`，品質 fallback：`qwen2.5:14b`) + `social-post-service` 代理發佈路由。
 
 ### 本地 Ollama 模型調校
 
@@ -139,14 +139,14 @@
 
 ```bash
 export OLLAMA_TRANSLATE_MODEL=qwen2.5:7b
-export OLLAMA_TRANSLATE_FALLBACK_MODEL=qwen3:4b
-export OLLAMA_SUMMARY_MODEL=qwen3:4b
-export OLLAMA_SUMMARY_FALLBACK_MODEL=qwen2.5:7b
-export OLLAMA_SLUG_MODEL=qwen3:4b
-export OLLAMA_SLUG_FALLBACK_MODEL=qwen2.5:7b
+export OLLAMA_TRANSLATE_FALLBACK_MODEL=qwen2.5:14b
+export OLLAMA_SUMMARY_MODEL=qwen2.5:7b
+export OLLAMA_SUMMARY_FALLBACK_MODEL=qwen2.5:14b
+export OLLAMA_SLUG_MODEL=qwen2.5:7b
+export OLLAMA_SLUG_FALLBACK_MODEL=qwen2.5:14b
 ```
 
-建議面試 demo 仍優先使用 Gemini 2.5 Flash；本地 Ollama 模式定位為離線、隱私與成本控制路徑。若要追求更快回應，可實測 `gemma3:4b` 或 `gemma3n:e4b`，但繁中翻譯與舞蹈術語品質需要人工抽查。
+建議面試 demo 仍優先使用 Gemini 2.5 Flash；本地 Ollama 模式定位為離線、隱私與成本控制路徑。`qwen3:4b` 在本機非串流測試中可能長時間無回應，不適合目前的 API hot path。若要追求更快回應，可另行實測 `gemma3:4b` 或 `gemma3n:e4b`，但繁中翻譯與舞蹈術語品質需要人工抽查。
 
 ---
 

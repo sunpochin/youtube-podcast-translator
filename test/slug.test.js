@@ -294,7 +294,7 @@ describe('AI & GitBook Services 單元測試與 Mock 驗證', () => {
   test('translateTitleToSlug - 當預設 Ollama slug model 成功時，應直接使用其結果並過濾特殊字元', async (t) => {
     t.mock.method(globalThis, 'fetch', async (url, options) => {
       const body = JSON.parse(options.body);
-      assert.strictEqual(body.model, 'qwen3:4b');
+      assert.strictEqual(body.model, 'qwen2.5:7b');
       return {
         ok: true,
         json: async () => ({

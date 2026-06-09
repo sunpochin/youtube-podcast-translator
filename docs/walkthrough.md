@@ -40,17 +40,18 @@ Default split:
 
 ```bash
 OLLAMA_TRANSLATE_MODEL=qwen2.5:7b
-OLLAMA_TRANSLATE_FALLBACK_MODEL=qwen3:4b
-OLLAMA_SUMMARY_MODEL=qwen3:4b
-OLLAMA_SUMMARY_FALLBACK_MODEL=qwen2.5:7b
-OLLAMA_SLUG_MODEL=qwen3:4b
-OLLAMA_SLUG_FALLBACK_MODEL=qwen2.5:7b
+OLLAMA_TRANSLATE_FALLBACK_MODEL=qwen2.5:14b
+OLLAMA_SUMMARY_MODEL=qwen2.5:7b
+OLLAMA_SUMMARY_FALLBACK_MODEL=qwen2.5:14b
+OLLAMA_SLUG_MODEL=qwen2.5:7b
+OLLAMA_SLUG_FALLBACK_MODEL=qwen2.5:14b
 ```
 
 Reasoning:
 
 - full podcast translation needs better Traditional Chinese stability, so `qwen2.5:7b` is the safer fast default
-- summary and slug generation can prioritize latency, so `qwen3:4b` is acceptable
+- summary and slug generation also default to `qwen2.5:7b` because local `qwen3:4b` can stall in non-streaming requests
+- `qwen2.5:14b` remains the quality fallback when the fast model fails or the operator explicitly wants higher quality
 - `gemma3:4b` and `gemma3n:e4b` are valid candidates for speed experiments, but should be manually checked for Taiwan Mandarin and social-dance terminology quality before becoming defaults
 - for interview demos, Gemini 2.5 Flash remains the smoothest path; local Ollama is the offline/privacy/cost-control path
 
