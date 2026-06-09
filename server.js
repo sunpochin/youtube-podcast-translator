@@ -456,28 +456,9 @@ async function translateTitleToSlug(title, videoId) {
 "${title}"
 `;
 
+  // 1. 優先使用本地免費的 Ollama 14b / 7b 進行翻譯，確保完全免費與本地隱私
   try {
-    // 優先使用 Gemini 2.5 Flash 進行精確翻譯
-    if (process.env.GEMINI_API_KEY) {
-      console.log(`[Slug AI] 正在使用 Gemini 將標題翻譯為英文 Slug...`);
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: prompt,
-      });
-      const slugText = response.text ? response.text.trim().toLowerCase() : '';
-      const cleaned = slugText.replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-').replace(/^-+|-+$/g, '');
-      if (cleaned && cleaned.length > 2) {
-        console.log(`[Slug AI] Gemini 翻譯結果: ${cleaned}`);
-        return cleaned;
-      }
-    }
-  } catch (err) {
-    console.warn(`[Slug AI] ⚠️ Gemini 翻譯 Slug 失敗，降級使用本地大腦:`, err.message);
-  }
-
-  // 降級使用本地 Ollama 14b / 7b 進行翻譯
-  try {
-    console.log(`[Slug AI] 正在使用 Ollama (14b) 將標題翻譯為英文 Slug...`);
+    console.log(`[Slug AI] 正在優先使用本地免費 Ollama (14b) 將標題翻譯為英文 Slug...`);
     const response = await fetch('http://127.0.0.1:11434/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -522,7 +503,26 @@ async function translateTitleToSlug(title, videoId) {
     }
   }
 
-  // 若 AI 翻譯全部失敗，使用正則與影片 ID 退化方案
+  // 2. 降級使用雲端 Gemini 2.5 Flash 進行翻譯 (需要 API Key，有潛在額度成本)
+  try {
+    if (process.env.GEMINI_API_KEY) {
+      console.log(`[Slug AI] 正在降級使用 Gemini 將標題翻譯為英文 Slug...`);
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+      });
+      const slugText = response.text ? response.text.trim().toLowerCase() : '';
+      const cleaned = slugText.replace(/[^\w\-]+/g, '').replace(/\-\-+/g, '-').replace(/^-+|-+$/g, '');
+      if (cleaned && cleaned.length > 2) {
+        console.log(`[Slug AI] Gemini 翻譯結果: ${cleaned}`);
+        return cleaned;
+      }
+    }
+  } catch (err) {
+    console.warn(`[Slug AI] ⚠️ Gemini 翻譯 Slug 失敗`, err.message);
+  }
+
+  // 3. 若 AI 翻譯全部失敗，使用正則與影片 ID 退化方案
   console.log(`[Slug AI] ⚠️ AI 翻譯 Slug 全部失敗，使用正則退化方案`);
   return generateCleanSlugFallback(title, videoId);
 }
@@ -694,6 +694,16 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(process.cwd(), 'dashboard/dist/index.html'));
 });
 
-app.listen(PORT, () => {
-  console.log(`🎙️ Podcast Translator service running on http://localhost:${PORT}`);
-});
+if (process.env.NODE_ENV !== 'test') {
+  app.listen(PORT, () => {
+    console.log(`🎙️ Podcast Translator service running on http://localhost:${PORT}`);
+  });
+}
+
+// 匯出輔助函式以供單元測試使用
+export {
+  generateSlug,
+  generateCleanSlugFallback,
+  translateTitleToSlug,
+  isLocalRequest
+};
