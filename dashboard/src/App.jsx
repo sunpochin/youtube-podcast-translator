@@ -292,7 +292,7 @@ function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: publishTitle,
+          title: publishTitle || videoTitle || 'Podcast 翻譯筆記',
           url: publishMessage.url,
           image: base64Image
         })
