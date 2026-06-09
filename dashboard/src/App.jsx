@@ -24,6 +24,7 @@ function App() {
   
   const [isTranslating, setIsTranslating] = useState(false)
   const [activeTab, setActiveTab] = useState('full') // 'full' | 'summary'
+  const [queueStatus, setQueueStatus] = useState(null) // { status: 'waiting' | 'running', position: number, currentTitle: string }
 
   // 密碼與引擎選擇狀態
   const [password, setPassword] = useState('')
@@ -96,6 +97,7 @@ function App() {
     setTranslationProgress(0)
     setTranslatedParagraphs([])
     setSummary('')
+    setQueueStatus(null)
     
     try {
       const res = await fetch('/api/translate', {
@@ -134,7 +136,15 @@ function App() {
           if (cleanedLine.startsWith('data: ')) {
             try {
               const packet = JSON.parse(cleanedLine.substring(6))
-              if (packet.type === 'chunk') {
+              if (packet.type === 'queue_waiting') {
+                setQueueStatus({
+                  status: 'waiting',
+                  position: packet.position,
+                  currentTitle: packet.currentTitle
+                })
+              } else if (packet.type === 'queue_start') {
+                setQueueStatus({ status: 'running' })
+              } else if (packet.type === 'chunk') {
                 receivedParagraphs = [...receivedParagraphs, packet.chunk]
                 setTranslatedParagraphs(receivedParagraphs)
                 setTranslationProgress(packet.progress)
@@ -159,6 +169,7 @@ function App() {
       setError(err.message || 'AI 翻譯連線中斷，請重試')
     } finally {
       setIsTranslating(false)
+      setQueueStatus(null)
     }
   }
 
@@ -455,7 +466,30 @@ function App() {
                   <div className="mt-6 pt-4 border-t border-white/5">
                     {translatedParagraphs.length === 0 || isTranslating ? (
                       <div className="flex flex-col gap-3">
-                        {isTranslating && (
+                        {/* 排隊狀態顯示器 */}
+                        {queueStatus && queueStatus.status === 'waiting' && (
+                          <div className="bg-amber-950/40 border border-amber-500/30 text-amber-400 p-4 rounded-xl text-sm text-left flex flex-col gap-1.5 animate-pulse">
+                            <div className="font-semibold flex items-center gap-1.5">
+                              <Clock size={16} />
+                              <span>📞 客服語音：前方有任務正在處理</span>
+                            </div>
+                            <div className="text-xs leading-relaxed text-amber-300/90">
+                              當前處理中：<span className="text-white font-medium line-clamp-1">{queueStatus.currentTitle}</span>
+                              您目前排在第 <strong className="text-white font-bold text-sm bg-white/10 px-1.5 py-0.5 rounded">{queueStatus.position}</strong> 位，請稍候，完成後將自動開始您的翻譯...
+                            </div>
+                          </div>
+                        )}
+
+                        {queueStatus && queueStatus.status === 'running' && (
+                          <div className="bg-emerald-950/40 border border-emerald-500/30 text-emerald-400 p-4 rounded-xl text-sm text-left flex flex-col gap-1.5">
+                            <div className="font-semibold flex items-center gap-1.5">
+                              <Sparkles size={16} className="animate-pulse text-spotify-green" />
+                              <span>🎉 輪到你了！正在啟動翻譯服務...</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {isTranslating && (!queueStatus || queueStatus.status === 'running') && (
                           <div className="w-full text-left">
                             <div className="flex justify-between text-xs text-spotify-text mb-1.5">
                               <span>翻譯進度</span>
@@ -477,7 +511,11 @@ function App() {
                           {isTranslating ? (
                             <>
                               <div className="animate-spin rounded-full h-5 w-5 border-2 border-black border-t-transparent"></div>
-                              <span>AI 雙語對照翻譯中... ({translationProgress}%)</span>
+                              <span>
+                                {queueStatus && queueStatus.status === 'waiting' 
+                                  ? `排隊中 (第 ${queueStatus.position} 位)...` 
+                                  : `AI 雙語對照翻譯中... (${translationProgress}%)`}
+                              </span>
                             </>
                           ) : (
                             <>
