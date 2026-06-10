@@ -27,7 +27,7 @@ graph TD
         Safety -->|11. GitOps Sync| GitBookRepo[(GitBook 本地與遠端倉庫)]
     end
     
-    User -->|12. Generate 9:16 Canvas & QR| Canvas[HTML5 Canvas / QR API]
+    User -->|12. Generate 9:16 Canvas & QR| Canvas[HTML5 Canvas / Local QR Renderer]
     User -->|13. POST /api/social/publish| Express
     Express -->|14. Proxy Request| Microservice[(social-post-service 微服務: 3012)]
 ```
@@ -78,12 +78,28 @@ graph TD
     1.  **零依賴 HTML5 Canvas 圖片生成技術**：
         *   為了避免引入臃腫的 `html2canvas` 或 `puppeteer` 導致前端包體膨脹，我們在 React 中使用純 JavaScript 透過 HTML5 Canvas API 手寫了高效的卡片渲染引擎。
         *   引擎在背景渲染一張符合 IG 限動比例（9:16，1080x1920）的高解析度 PNG 圖片，包含 Podcast 中英文標題、圓角卡片磨砂效果（Glassmorphism）、影片封面指示圖與**動態 QR Code 二維碼**。
-    2.  **跨域安全防範 (Tainted Canvas Guard)**：
-        *   在 Canvas 繪製動態 QR Code 時，若直接繪製外部圖片會觸發瀏覽器的「畫布污染 (Tainted Canvas)」安全限制，導致無法導出 base64 圖片。
-        *   我們在載入 Image 時顯式設定 `qrImage.crossOrigin = 'anonymous'` 繞過此安全限制，成功導出 PNG。
-    3.  **微服務整合與健壯退化方案 (Resilient Proxy)**：
+    2.  **本地 QR Code 生成 (Local QR Renderer)**：
+        *   早期版本透過外部 QR 圖片 API 產生二維碼，存在服務可用性、延遲、隱私與 Canvas CORS/Tainted Canvas 風險。
+        *   現在改用前端本地 `qrcode` 套件直接產生 QR canvas/data URL，分享卡渲染不再依賴第三方 QR 服務，也不會把 GitBook URL 傳給外部 QR API。
+    3.  **微服務整合與明確錯誤語意 (Microservice Proxy with Honest Semantics)**：
         *   後端 Express 新增了 `POST /api/social/publish` 路由，作為 companion microservice `social-post-service` (port: 3012) 的發佈代理。
-        *   設定 5 秒超時（`AbortSignal.timeout(5000)`）防止微服務當機掛起主伺服器。若連線失敗，自動降級為 **Mock 模擬發佈**，返回 `mocked: true`，確保使用者體驗不中斷。
+        *   設定 5 秒超時（`AbortSignal.timeout(5000)`）防止微服務當機掛起主伺服器。若連線失敗，Live 與 Demo 都會明確失敗，不再由主服務偽造任務成功。
+        *   Demo 模式不是主服務本地假任務，而是代理到 `social-post-service` 並傳入 `mode: "mock"`，由微服務建立 job、轉移狀態、提供輪詢結果。
+
+#### 🔧 原本 code 與現在 code 的差別
+
+**原本的做法：**
+* `youtube-podcast-translator` 的 `server.js` 內有一個 `mockJobs` 記憶體 `Map`。
+* 前端選 Demo Mock 時，主服務自己產生 `mock-*` jobId，自己用時間差模擬 `queued -> posting -> completed`。
+* `/api/social/status/:jobId` 如果看到 `mock-*`，就直接查主服務自己的 `mockJobs`，完全不需要 `social-post-service` 存在。
+* Live 模式有代理到 `social-post-service`，但 Demo 模式其實沒有跨服務邊界，因此嚴格說只是主服務裡的模擬流程。
+
+**現在的做法：**
+* `youtube-podcast-translator` 不再保存任何 mock job 狀態。
+* Demo Mock 也會呼叫 `social-post-service` 的 `POST /api/posts`，並送出 `mode: "mock"`。
+* `social-post-service` 是 job lifecycle 的唯一 owner：建立 job、儲存狀態、執行 `MockStrategy`、回傳 `GET /api/posts/:id` 查詢結果。
+* Live 模式會送 `mode: "live"`；如果下游仍是 `STRATEGY=mock`，微服務回 `503`，避免把 demo mock 包裝成真實 Instagram 發佈。
+* translator 只負責組 caption、轉交請求、處理 timeout、代理 status polling，符合 gateway/proxy 的責任邊界。
 
 #### 🎤 面試攻防實戰（Mock Interview Q&A）
 
@@ -94,8 +110,24 @@ graph TD
 >    「這是一個典型的 API 邊界限制下的 UX 折衷。我們無法直接幫用戶發 Story，但我們可以做到『半自動化橋接』：前端繪製高質感的 9:16 分享圖，並在使用者點擊發佈時，**自動將 GitBook 目標連結複製到用戶剪貼簿**。用戶下載圖片後，直接在 IG 上傳並貼上連結即可，將摩擦力降到最低。」
 > 2. **架構上的高內聚、低耦合**：
 >    「在系統面上，我依然將『社交分享』解耦為獨立的微服務 `social-post-service`，並使用 `202 Accepted` 的非同步任務隊列設計。這樣做有兩個重大的工程優點：
->    * **高彈性 (Flexibility)**：微服務內部採用**策略模式 (Strategy Pattern)**。目前雖然因為 Meta 的限制使用 `MockStrategy` 來記錄發佈日誌與狀態機轉移；但如果未來 Meta 開放了限動 API，或者我們想擴展發佈到其他有開放 API 的社交平台（如 Threads 或 X/Twitter），**我們的主翻譯服務不需要修改任何一行程式碼**，只需在微服務中新增/切換真實策略即可。
->    * **高容錯 (Fault Tolerance)**：主服務使用 5 秒超時機制進行保護。即使發佈微服務當機，主服務也會自動降級回傳模擬成功結果，確保用戶流程不中斷，完美落實了微服務架構的獨立運作與優雅降級方針。」
+>    * **高彈性 (Flexibility)**：微服務內部採用**策略模式 (Strategy Pattern)**。目前雖然因為 Meta 的限制使用 `MockStrategy` 來記錄發佈日誌與狀態機轉移；但如果未來 Meta 開放了限動 API，或者我們想擴展發佈到其他有開放 API 的社交平台（如 Threads 或 X/Twitter），**主翻譯服務不需要理解每個平台 SDK**，只需維持同一個 `POST /api/posts` contract。
+>    * **高可觀測性 (Observability)**：主服務不再把下游失敗包裝成成功。Live 發佈如果沒有真實 provider strategy，就回 `503`；Demo 發佈則明確標示 `mode: "mock"`。這讓產品展示方便，但工程語意仍然誠實。」
+
+#### ⚖️ 做成 microservice 的優點與缺點
+
+**優點：**
+* **責任分離**：translator 專心處理字幕、翻譯、GitBook 發佈與前端 UX；social-post-service 專心處理社群發佈任務。
+* **可替換平台策略**：未來要接 Threads、X、Ayrshare 或真實 Meta provider，只改 `social-post-service` 的 strategy，不必把平台 SDK 塞進 translator。
+* **非同步工作更自然**：社群發佈通常有圖片上傳、限流、失敗重試、平台回傳 ID 等延遲工作，用 `202 Accepted + jobId + polling` 比同步等待更合理。
+* **錯誤更清楚**：下游掛掉、下游拒絕、真實 provider 不存在，現在可以用不同 HTTP status 和 job status 表達，而不是全部假裝成功。
+* **面試敘事更站得住腳**：現在 Demo mock job 也真的跨服務，不是同一個 Express app 內部演戲。
+
+**缺點：**
+* **本地開發更麻煩**：要同時啟動 translator 與 social-post-service，少開一個服務就會 503。
+* **部署與監控成本增加**：多一個 process，就多健康檢查、PM2 設定、log、port、環境變數與 restart 流程。
+* **分散式除錯更難**：以前只看 translator log；現在要追 `3015 -> 3012` 兩邊的 request 和 jobId。
+* **資料一致性還是有限**：目前 social-post-service 用 in-memory job store，重啟後 job 狀態會消失；若要正式產品化，需要 Redis/BullMQ 或資料庫。
+* **對這個規模可能偏重**：如果只是個人一次性下載 IG 圖卡，前端 Native Share + 下載就夠；microservice 是為了展示可擴展邊界與未來平台整合，不是最低成本做法。
 
 ---
 
@@ -136,6 +168,7 @@ graph TD
 * **錯誤的設計（隱藏細節）**：
   如果微服務明明啟動了，但因為我們傳過去的圖片太大而回傳了 `500 錯誤`；此時如果後端把這個錯誤吃掉，假裝它「連線失敗」並自動降級顯示「模擬發佈成功」，這就是**摧毀了可觀測性**。管理者會以為發佈成功，但實際上資料根本沒進去，而且沒有人知道為什麼。
 * **正確的設計（維持可觀測性）**：
-  我們修改了代碼，嚴格區分：
-  1. **連線失敗/超時**：這是網路層問題，我們進行「優雅降級（Mock Success）」。
-  2. **API 錯誤（例如 400/500）**：這是商業邏輯或內部錯誤。後端會**原封不動地把錯誤碼和微服務回傳的錯誤訊息拋回給前端**。這使得日誌與前端介面能一眼看出「哦！是微服務那邊資料校驗失敗了」，這就是良好的可觀測性實踐。
+  我們修改了程式碼，嚴格區分：
+  1. **連線失敗/超時 (Live 模式)**：這是實體連線與部署問題。我們拒絕包裝，而是明確回傳 `503 Service Unavailable` 錯誤並進行日誌記錄，讓前端使用者能立即得知微服務狀態，維持高可觀測性。
+  2. **Demo 模擬展示模式**：當手動啟用模擬模式時，主服務仍會代理到 `social-post-service`，由下游服務以 `MockStrategy` 建立並處理一整套從 `queued` 到 `completed` 的非同步任務狀態移轉。
+  3. **微服務 API 報錯 (如 400/500)**：我們原封不動地將下游微服務的狀態碼與錯誤訊息回傳給前端，絕不遮掩真實異常。

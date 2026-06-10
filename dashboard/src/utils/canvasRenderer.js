@@ -1,5 +1,7 @@
 // dashboard/src/utils/canvasRenderer.js
-// 負責在背景渲染 9:16 的 Instagram Story 分享圖卡（純 Canvas 繪製，無外部依賴）
+// 負責在背景渲染 9:16 的 Instagram Story 分享圖卡（純 Canvas 繪製，二維碼本地生成）
+
+import QRCode from 'qrcode'
 
 /**
  * 繪製圓角矩形邊框
@@ -51,13 +53,70 @@ function drawWrapText(ctx, text, x, y, maxWidth, lineHeight) {
 }
 
 /**
+ * 繪製 QR Code 生成失敗時的降級佔位圖
+ */
+function drawFallbackPlaceholder(ctx, canvas, resolve, reject, options = {}, isTimeout = false) {
+  const { shortUrl = '', publishUrl = '' } = options
+
+  // 本地 QR 生成失敗時，繪製精美的替代佔位圖，避免顯示空白。
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.06)'
+  ctx.strokeStyle = 'rgba(29, 185, 84, 0.4)'
+  ctx.lineWidth = 4
+  drawRoundRect(ctx, 340, 960, 400, 400, 24)
+  ctx.fill()
+  ctx.stroke()
+
+  // 繪製連結符號與提示
+  ctx.fillStyle = '#1DB954'
+  ctx.font = 'bold 80px system-ui, -apple-system, sans-serif'
+  ctx.fillText('🔗', 540, 1120)
+
+  ctx.fillStyle = '#a7a7a7'
+  ctx.font = 'bold 26px system-ui, -apple-system, sans-serif'
+  ctx.fillText('掃描連結閱讀', 540, 1210)
+
+  ctx.fillStyle = '#888888'
+  ctx.font = '20px system-ui, -apple-system, sans-serif'
+  ctx.fillText(isTimeout ? '(QR 生成逾時)' : '(QR 生成失敗)', 540, 1255)
+
+  // 繪製頂部手機看截圖說明
+  ctx.fillStyle = '#a7a7a7'
+  ctx.font = '32px system-ui, -apple-system, sans-serif'
+  ctx.fillText('👇 手機看請截圖，再長按 QR code', 540, 910)
+
+  // 繪製短網址
+  const displayUrl = shortUrl || publishUrl.replace(/^https?:\/\//, '').replace(/^www\./, '')
+  let urlText = displayUrl
+  if (urlText.length > 40) {
+    urlText = urlText.substring(0, 37) + '...'
+  }
+  ctx.fillStyle = '#FFFFFF'
+  ctx.font = 'bold 34px system-ui, -apple-system, sans-serif'
+  ctx.fillText(`或輸入：${urlText}`, 540, 1420)
+
+  ctx.fillStyle = '#1DB954'
+  ctx.font = 'bold 38px system-ui, -apple-system, sans-serif'
+  ctx.fillText('SCAN / SCREENSHOT TO READ', 540, 1485)
+
+  try {
+    const base64Data = canvas.toDataURL('image/png')
+    resolve(base64Data)
+  } catch (err) {
+    reject(new Error(`導出失敗：${err.message}`))
+  }
+}
+
+/**
  * 渲染分享圖卡並回傳 base64 PNG 資料
  * @param {string} title - 影片/文章標題
  * @param {string} publishUrl - GitBook 發佈後的對照閱讀網址
+ * @param {object} options - 分享模式設定（如 A/B/C 模式與自訂字串）
  * @returns {Promise<string>} - Promise 解析為 base64 圖片資料
  */
-export async function generateShareCard(title, publishUrl) {
+export async function generateShareCard(title, publishUrl, options = {}) {
   return new Promise((resolve, reject) => {
+    const { shareMode = 'semi_auto', keyword = '文章', shortUrl = '' } = options
+
     // 建立背景畫布
     const canvas = document.createElement('canvas')
     canvas.width = 1080
@@ -109,33 +168,103 @@ export async function generateShareCard(title, publishUrl) {
     ctx.font = 'bold 34px system-ui, -apple-system, sans-serif'
     ctx.fillText('Salsa & Bachata Social Dancing', 540, 850)
 
-    // 載入與繪製跨域安全 QR Code
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=${encodeURIComponent(publishUrl)}`
-    const qrImage = new Image()
-    qrImage.crossOrigin = 'anonymous'
-    qrImage.onload = () => {
-      ctx.drawImage(qrImage, 380, 930, 320, 320)
+    if (shareMode === 'keyword') {
+      // 繪製 Mode C 的回覆關鍵字卡片 layout
+      ctx.fillStyle = 'rgba(29, 185, 84, 0.08)'
+      ctx.strokeStyle = 'rgba(29, 185, 84, 0.3)'
+      ctx.lineWidth = 4
+      drawRoundRect(ctx, 240, 960, 600, 360, 30)
+      ctx.fill()
+      ctx.stroke()
 
-      // 繪製底部提示文字
+      // 繪製引導文字
+      ctx.fillStyle = '#FFFFFF'
+      ctx.font = 'bold 38px system-ui, -apple-system, sans-serif'
+      ctx.fillText('💬 想要閱讀全文？', 540, 1030)
+
       ctx.fillStyle = '#a7a7a7'
-      ctx.font = '34px system-ui, -apple-system, sans-serif'
-      ctx.fillText('長按或截圖掃碼，閱讀中英雙語對照筆記', 540, 1320)
+      ctx.font = '30px system-ui, -apple-system, sans-serif'
+      ctx.fillText('在下方回覆或私訊：', 540, 1105)
+
+      ctx.fillStyle = '#1DB954'
+      ctx.font = 'bold 56px system-ui, -apple-system, sans-serif'
+      ctx.fillText(`「${keyword}」`, 540, 1195)
+
+      ctx.fillStyle = '#a7a7a7'
+      ctx.font = '30px system-ui, -apple-system, sans-serif'
+      ctx.fillText('我會自動傳送連結給您！', 540, 1270)
+
+      // 繪製短網址與英文標題
+      const displayUrl = shortUrl || publishUrl.replace(/^https?:\/\//, '').replace(/^www\./, '')
+      let urlText = displayUrl
+      if (urlText.length > 40) {
+        urlText = urlText.substring(0, 37) + '...'
+      }
+      ctx.fillStyle = '#FFFFFF'
+      ctx.font = 'bold 34px system-ui, -apple-system, sans-serif'
+      ctx.fillText(`或手動輸入：${urlText}`, 540, 1420)
 
       ctx.fillStyle = '#1DB954'
       ctx.font = 'bold 38px system-ui, -apple-system, sans-serif'
-      ctx.fillText('SCAN TO READ', 540, 1395)
+      ctx.fillText('REPLY TO GET THE LINK', 540, 1485)
 
-      // 導出 base64 圖片內容
+      // 直接輸出 base64 PNG 圖片，不需載入二維碼
       try {
         const base64Data = canvas.toDataURL('image/png')
         resolve(base64Data)
       } catch (err) {
-        reject(new Error(`導出失敗 (Tainted Canvas)：${err.message}`))
+        reject(new Error(`導出失敗：${err.message}`))
       }
+    } else {
+      // 繪製手機看截圖說明
+      ctx.fillStyle = '#a7a7a7'
+      ctx.font = '32px system-ui, -apple-system, sans-serif'
+      ctx.fillText('👇 手機看請截圖，再長按 QR code', 540, 910)
+
+      // 使用本地 qrcode 模組直接生成 QR code 避免依賴外部 API
+      const qrImage = new Image()
+      QRCode.toDataURL(publishUrl, {
+        width: 400,
+        margin: 1,
+        errorCorrectionLevel: 'M',
+        color: {
+          dark: '#0a0a0a',
+          light: '#ffffff'
+        }
+      })
+      .then((qrDataUrl) => {
+        qrImage.onload = () => {
+          // 繪製本地生成的二維碼 (400x400)
+          ctx.drawImage(qrImage, 340, 960, 400, 400)
+
+          // 繪製短網址
+          const displayUrl = shortUrl || publishUrl.replace(/^https?:\/\//, '').replace(/^www\./, '')
+          let urlText = displayUrl
+          if (urlText.length > 40) {
+            urlText = urlText.substring(0, 37) + '...'
+          }
+          ctx.fillStyle = '#FFFFFF'
+          ctx.font = 'bold 34px system-ui, -apple-system, sans-serif'
+          ctx.fillText(`或輸入：${urlText}`, 540, 1420)
+
+          ctx.fillStyle = '#1DB954'
+          ctx.font = 'bold 38px system-ui, -apple-system, sans-serif'
+          ctx.fillText('SCAN / SCREENSHOT TO READ', 540, 1485)
+
+          // 導出 base64 圖片內容
+          try {
+            const base64Data = canvas.toDataURL('image/png')
+            resolve(base64Data)
+          } catch (err) {
+            reject(new Error(`導出失敗：${err.message}`))
+          }
+        }
+        qrImage.src = qrDataUrl
+      })
+      .catch((err) => {
+        console.warn('[Canvas] 本地 QR Code 生成失敗，啟動降級佔位圖機制。', err)
+        drawFallbackPlaceholder(ctx, canvas, resolve, reject, { shortUrl, publishUrl }, false)
+      })
     }
-    qrImage.onerror = () => {
-      reject(new Error('無法載入 QR Code 生成服務的圖片'))
-    }
-    qrImage.src = qrUrl
   })
 }
