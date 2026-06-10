@@ -24,7 +24,6 @@ const zhNormalizationMap = new Map([
   ['alison sanji', 'Alisson Sandi'],
   ['alisson sanji', 'Alisson Sandi'],
   ['阿倫．桑吉', 'Alisson Sandi'],
-  ['阿倫．桑吉', 'Alisson Sandi'],
   ['巴西佐克', 'Brazilian Zouk 舞'],
   ['巴西Zouk', 'Brazilian Zouk 舞'],
   ['佐克舞', 'Brazilian Zouk 舞'],
