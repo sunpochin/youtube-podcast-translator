@@ -217,6 +217,38 @@ Kid-friendly version:
 
 If you need to find it again later, those are the only three places you need first.
 
+### 沒字幕時怎麼辦
+
+#### 中文
+現在 `/api/transcript` 不只會抓 YouTube 字幕，還會在字幕關閉時自動走 fallback：
+
+1. 先抓字幕
+2. 抓不到就下載音訊
+3. 把音訊送去轉寫後端
+4. 把轉寫結果轉回逐字稿，再進入原本的翻譯/摘要流程
+
+目前可用的轉寫後端有兩種：
+
+- `OPENAI_API_KEY` + `OPENAI_TRANSCRIBE_MODEL`
+- `TRANSCRIPTION_ENDPOINT` 自訂轉寫服務
+
+這樣的目的不是炫技，而是讓使用者在字幕關閉時還能繼續往下看，不會直接看到「無法取得字幕」就結束。
+
+#### English
+`/api/transcript` now does more than fetch YouTube subtitles. When subtitles are disabled, it automatically falls back:
+
+1. Try subtitles first
+2. If that fails, download the audio
+3. Send the audio to a transcription backend
+4. Convert the transcription back into transcript segments and continue through the existing translation/summary flow
+
+Two transcription backends are supported:
+
+- `OPENAI_API_KEY` + `OPENAI_TRANSCRIBE_MODEL`
+- `TRANSCRIPTION_ENDPOINT` for a custom transcription service
+
+The point is not to be clever. It is to keep the user moving when subtitles are unavailable instead of ending the flow at a hard error.
+
 ### 第二層是什麼
 
 #### 中文

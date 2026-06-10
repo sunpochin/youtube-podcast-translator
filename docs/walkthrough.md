@@ -9,6 +9,7 @@ We have successfully migrated the translation pipeline of the **YouTube Podcast 
 
 ### 1. Backend (`server.js`)
 * **Metadata Extraction**: Integrated YouTube oEmbed API inside `/api/transcript` to retrieve the video title dynamically.
+* **No-Transcript Fallback**: When YouTube subtitles are disabled, `/api/transcript` now falls back to downloading the audio and sending it to a configurable transcription backend, then reuses the same translation pipeline.
 * **Title Translator**: Added title translation step to `/api/translate` to build the default formatted title `[Chinese Translation] - Original Title`.
 * **Markdown Customization**: Added GitBook's official embed block syntax inside the GitBook publisher instead of raw iframe HTML, which can be sanitized or rendered as plain text by GitBook sync.
 * **Link Propagation**: Extracted the final GitBook page slug and returned the complete URL in the publish response payload.
@@ -55,6 +56,38 @@ Reasoning:
 - `qwen2.5:14b` remains the quality fallback when the fast model fails or the operator explicitly wants higher quality
 - `gemma3:4b` and `gemma3n:e4b` are valid candidates for speed experiments, but should be manually checked for Taiwan Mandarin and social-dance terminology quality before becoming defaults
 - for interview demos, Gemini 2.5 Flash remains the smoothest path; local Ollama is the offline/privacy/cost-control path
+
+### No-Transcript Fallback
+
+#### 中文
+如果 YouTube 把字幕關掉，`/api/transcript` 不會直接失敗，而是改走這條路：
+
+1. 先嘗試抓字幕
+2. 抓不到時，下載影片音訊
+3. 把音訊送去可配置的轉寫後端
+4. 轉成逐字稿後，再沿用原本的翻譯與摘要流程
+
+目前支援的轉寫後端是：
+
+- `OPENAI_API_KEY` + `OPENAI_TRANSCRIBE_MODEL`
+- 或 `TRANSCRIPTION_ENDPOINT` 指向你自己的轉寫服務
+
+這樣做的目的很單純：不要被 YouTube 的字幕開關卡死，讓使用者體感更接近 Gemini 網頁端那種「就算沒字幕也能看懂內容」的效果。
+
+#### English
+If YouTube subtitles are disabled, `/api/transcript` no longer fails immediately. Instead it follows this path:
+
+1. Try subtitles first
+2. If subtitles are unavailable, download the audio
+3. Send the audio to a configurable transcription backend
+4. Convert the transcription into segments and reuse the existing translation/summary pipeline
+
+Supported transcription backends currently include:
+
+- `OPENAI_API_KEY` + `OPENAI_TRANSCRIBE_MODEL`
+- or `TRANSCRIPTION_ENDPOINT` pointing to your own transcription service
+
+The goal is simple: do not get blocked by YouTube subtitle availability, and make the experience closer to the Gemini web flow where the content can still be understood even when subtitles are disabled.
 
 #### English
 The local Ollama path now treats model choice as runtime configuration instead of hard-coding `qwen2.5:14b`.
