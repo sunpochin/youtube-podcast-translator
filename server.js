@@ -4,13 +4,13 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
-import { YoutubeTranscript } from 'youtube-transcript';
 
 // 導入自訂中間件
 import { isLocalRequest, verifyGitBookPassword, apiLimiter } from './src/middleware/auth.js';
 
 // 導入 AI 翻譯服務與實體
 import { ai, enqueueOllamaTask, normalizeTraditionalChineseOutput, normalizeSummaryOutput, ollamaModelConfig, translateWithOllama, summarizeWithOllama, translationQueueManager } from './src/services/ai.service.js';
+import { getTranscriptWithFallback } from './src/services/transcription.service.js';
 
 // 導入 GitBook 發佈服務
 import { publishToGitBook } from './src/services/gitbook.service.js';
@@ -61,13 +61,7 @@ app.post('/api/transcript', async (req, res) => {
   }
 
   try {
-    const transcriptList = await YoutubeTranscript.fetchTranscript(videoId, { lang: 'en' });
-    
-    const formattedTranscript = transcriptList.map(item => ({
-      text: item.text,
-      start: item.offset / 1000,
-      duration: item.duration / 1000
-    }));
+    const { source, transcript: formattedTranscript } = await getTranscriptWithFallback(videoId);
 
     let videoTitle = '';
     try {
@@ -80,10 +74,10 @@ app.post('/api/transcript', async (req, res) => {
       console.warn('無法從 YouTube oEmbed 取得影片標題:', oembedErr.message);
     }
 
-    res.json({ videoId, title: videoTitle, transcript: formattedTranscript });
+    res.json({ videoId, title: videoTitle, transcript: formattedTranscript, source });
   } catch (err) {
     console.error('抓取字幕失敗:', err);
-    res.status(500).json({ error: `無法取得該影片的英文字幕。原因：${err.message || '該影片可能不支援或無英文字幕'}` });
+    res.status(500).json({ error: `無法取得該影片的英文字幕或完成音訊轉寫。原因：${err.message || '該影片可能不支援字幕，且轉寫服務未設定或失敗'}` });
   }
 });
 
