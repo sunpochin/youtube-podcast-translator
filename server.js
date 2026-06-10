@@ -10,7 +10,7 @@ import { YoutubeTranscript } from 'youtube-transcript';
 import { isLocalRequest, verifyGitBookPassword, apiLimiter } from './src/middleware/auth.js';
 
 // 導入 AI 翻譯服務與實體
-import { ai, enqueueOllamaTask, normalizeTraditionalChineseOutput, ollamaModelConfig, translateWithOllama, summarizeWithOllama, translationQueueManager } from './src/services/ai.service.js';
+import { ai, enqueueOllamaTask, normalizeTraditionalChineseOutput, normalizeSummaryOutput, ollamaModelConfig, translateWithOllama, summarizeWithOllama, translationQueueManager } from './src/services/ai.service.js';
 
 // 導入 GitBook 發佈服務
 import { publishToGitBook } from './src/services/gitbook.service.js';
@@ -149,6 +149,8 @@ app.post('/api/translate', async (req, res) => {
 翻譯規範：
 1. 輸出格式必須僅包含翻譯後的繁體中文，不要包含任何前導詞、說明或引號。
 2. "Salsa" 一律翻譯為「Salsa」或「莎莎舞」，絕對不要翻譯成「桑巴舞」、「沙薩」或簡體字。
+3. "Brazilian Zouk" 一律翻譯為「Brazilian Zouk 舞」，絕對不要翻譯成「巴西佐克」。
+4. 關於 "What ... Actually Costs You"，此處 "costs" 指的是跳舞所需面臨的「代價與成本」（例如打亂睡眠作息、完美主義焦慮等），請翻譯成「實際上需要付出什麼代價」或「的真實代價」，絕對不要生硬保留英文單字 "cost"。
 
 影片標題：
 "${title}"
@@ -210,6 +212,8 @@ app.post('/api/translate', async (req, res) => {
    - "Salsa" 一律翻譯為「Salsa」或「莎莎舞」，絕對不要翻譯成「桑巴舞」、「沙薩」或簡體字。
    - "Bachata" 一律翻譯為「Bachata」或「巴恰塔」。
    - "Kizomba" 一律保留為「Kizomba」。
+   - "Brazilian Zouk" 一律翻譯為「Brazilian Zouk 舞」，絕對不要翻譯成「巴西佐克」或「佐克舞」。
+   - 語音辨識錯誤修正：字幕中的人名 "Alison Sanji" 或 "Alisson Sanji" 實為 Zouk 圈知名舞者 "Alisson Sandi"，請一律更正並翻譯為「Alisson Sandi」或「艾莉森」，切勿使用「阿倫．桑吉」。
    - "congress" 或 "congresses" 指的是「舞蹈節」或「舞蹈大會」，絕對不要翻譯成「國會」或「議會」。
    - "social" 或 "socials" 指的是「舞會」或「社交舞會」，而非「社會」或「社交的」。
    - "lineup" 或 "lineups" 指的是「師資陣容」或「演出陣容」。
@@ -267,6 +271,7 @@ app.post('/api/translate', async (req, res) => {
 - "Salsa" 一律寫成「Salsa」或「莎莎舞」，絕對不要寫成「桑巴舞」、「沙薩」或簡體字。
 - "Bachata" 一律寫成「Bachata」或「巴恰塔」。
 - "Kizomba" 一律保留為「Kizomba」。
+- "Brazilian Zouk" 一律寫成「Brazilian Zouk 舞」，絕對不要寫成「巴西佐克」。
 - "social" 或 "socials" 在舞蹈脈絡下指「舞會」或「社交舞會」。
 
 Podcast 內容：
@@ -276,7 +281,7 @@ Podcast 內容：
             model: 'gemini-2.5-flash',
             contents: summaryPrompt,
           });
-          summaryText = summaryResponse.text ? normalizeTraditionalChineseOutput(summaryResponse.text) : '無法生成摘要。';
+          summaryText = summaryResponse.text ? normalizeSummaryOutput(summaryResponse.text) : '無法生成摘要。';
         } else {
           try {
             summaryText = await enqueueOllamaTask(() => summarizeWithOllama(fullEnglishText, ollamaModelConfig.summary));

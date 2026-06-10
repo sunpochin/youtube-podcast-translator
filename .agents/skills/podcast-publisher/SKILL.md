@@ -15,8 +15,10 @@ description: >-
 ## Quick Start
 當使用者要求「翻譯 Podcast」或「發佈到 GitBook」時，Agent 必須：
 1. **翻譯字詞規範**：嚴格使用本文件定義之術語對照表進行翻譯。
-2. **特別版權宣告**：如果來源是 **Zouk Nerds Podcast**，必須在文章開頭加入專屬聲明。
+2. **特別版權宣告**：如果來源是 **Zouk Nerds Podcast**，必須在文章開頭加入專屬聲明；這是條件式規則，只在來源判定為 ZoukNerds 時啟用。
 3. **使用輔助指令**：呼叫 `publish-helper.js` 來產生檔案與更新目錄。
+
+> 補充：這份 `SKILL.md` 是工作流程說明，不是最終執行邏輯。真正會寫入 GitBook 的內容與條件判斷，仍以 `publish-helper.js` 與 `src/services/gitbook.service.js` 為準。
 
 ---
 
@@ -29,7 +31,10 @@ description: >-
 | **Salsa** | Salsa、莎莎舞 | 桑巴舞、沙薩、沙薩舞 |
 | **Bachata** | Bachata、巴恰塔 | 芭洽塔、巴西巴恰塔 |
 | **Kizomba** | Kizomba | 基宗巴、奇宗巴 |
-| **congress / congresses** | 舞蹈節、舞蹈大會 | 國會、議會、代表大會 |
+| **Brazilian Zouk** | Brazilian Zouk 舞 | 巴西佐克、佐克、佐克舞 |
+| **Alison Sanji / Alisson Sanji** | Alisson Sandi (語音辨識錯誤修正) | 阿倫．桑吉、阿琳 |
+| **cost / costs (in title/context)** | 代價、代價與成本、付出什麼代價 | 直接保留為「cost」、或單純翻譯為「花費」、「成本」 |
+| **congress / congresses** | 舞蹈節/舞蹈大會 | 國會、議會、代表大會 |
 | **social / socials** | 舞會、社交舞會 | 社會、社交的、社交生活 |
 | **lineup / lineups** | 師資陣容、演出陣容 | 陣線、隊伍 |
 | **festival** | 舞蹈節、藝術節 | 節日、慶典 |
@@ -54,7 +59,7 @@ description: >-
 2. **特別版權宣告 (Zouk Nerds Podcast 專用)**：
    若內容源自 Zouk Nerds Podcast，必須在影片嵌入下方（大綱上方）加入以下內容：
    ```markdown
-   ## Acknowledgement 影音來源
+   ## Video Source, Acknowledgement  影音來源
    Special thanks to [Alisson Sandi](https://www.instagram.com/alisson.sandi/), host of the ZoukNerds Podcast, for graciously granting permission for this non-profit translation.
    ZoukNerds: [Video Title](https://www.youtube.com/watch?v=VIDEO_ID)
    ```
@@ -88,6 +93,15 @@ node .agents/skills/podcast-publisher/publish-helper.js update-summary \
   --slug "video-slug-name" \
   --summaryFile "./gitbook-space/SUMMARY.md"
 ```
+
+### ZoukNerds 專屬聲明
+只有在來源被判定為 ZoukNerds Podcast 時，才會自動插入下列致謝段落：
+
+- `Video Source, Acknowledgement / 影音來源`
+- `Special thanks to [Alisson Sandi](https://www.instagram.com/alisson.sandi/)...`
+- `ZoukNerds: [Video Title](https://www.youtube.com/watch?v=VIDEO_ID)`
+
+若不是 ZoukNerds 來源，不要加入這段內容。
 
 ---
 

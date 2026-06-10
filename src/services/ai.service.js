@@ -17,6 +17,17 @@ export const ollamaModelConfig = {
 };
 
 const zhNormalizationMap = new Map([
+  ['PEOPLE', 'people'],
+  ['People', 'people'],
+  ['Alison Sanji', 'Alisson Sandi'],
+  ['Alisson Sanji', 'Alisson Sandi'],
+  ['alison sanji', 'Alisson Sandi'],
+  ['alisson sanji', 'Alisson Sandi'],
+  ['阿倫．桑吉', 'Alisson Sandi'],
+  ['阿倫．桑吉', 'Alisson Sandi'],
+  ['巴西佐克', 'Brazilian Zouk 舞'],
+  ['巴西Zouk', 'Brazilian Zouk 舞'],
+  ['佐克舞', 'Brazilian Zouk 舞'],
   ['桑巴舞', '莎莎舞'],
   ['沙薩舞', '莎莎舞'],
   ['沙薩', 'Salsa'],
@@ -47,6 +58,8 @@ const zhNormalizationMap = new Map([
   ['说', '說'],
   ['归', '歸'],
   ['类', '類'],
+  ['于', '於'],
+  ['阵', '陣'],
   ['气', '氣'],
   ['处', '處'],
   ['数', '數'],
@@ -58,11 +71,58 @@ const zhNormalizationMap = new Map([
 
 export function normalizeTraditionalChineseOutput(text = '') {
   let normalized = String(text);
+  normalized = normalized
+    .replace(/^好的[，,]\s*以下是.*?[：:]\s*/u, '')
+    .replace(/^以下是.*?[：:]\s*/u, '')
+    .replace(/^#+\s*/gm, '')
+    .replace(/^\*\*\s*/gm, '');
   for (const [source, target] of zhNormalizationMap.entries()) {
     normalized = normalized.replaceAll(source, target);
   }
   return normalized.trim();
 }
+
+function normalizeSummaryOutput(text = '') {
+  let normalized = normalizeTraditionalChineseOutput(text);
+
+  // 第二層：摘要專用後處理，模型如果還是多講話，就把前導包裝切掉。
+  normalized = normalized
+    .replace(/^好的[，,]\s*以下是.*?[：:]\s*/u, '')
+    .replace(/^以下是.*?[：:]\s*/u, '')
+    .replace(/^根據.*?整理[：:]\s*/u, '')
+    .replace(/^Podcast 前段內容.*?[：:]\s*/u, '')
+    .replace(/^#+\s*/gm, '')
+    .replace(/^\*\s+/gm, '');
+
+  const summaryTermMap = new Map([
+    ['migrants', '移民'],
+    ['migrant', '移民'],
+    ['socials', '社交舞會'],
+    ['social', '社交舞會'],
+    ['DJs', 'DJ'],
+    ['DJs', 'DJ'],
+    ['dj', 'DJ'],
+    ['teachers', '老師'],
+    ['teacher', '老師'],
+    ['people', '人們'],
+    ['lineup', '師資陣容'],
+    ['lineups', '師資陣容'],
+    ['workshops', '大師課'],
+    ['workshop', '大師課'],
+    ['festival', '舞蹈節'],
+    ['congress', '舞蹈節'],
+    ['congresses', '舞蹈節']
+  ]);
+
+  for (const [source, target] of summaryTermMap.entries()) {
+    normalized = normalized.replaceAll(source, target);
+    normalized = normalized.replaceAll(source.toUpperCase(), target);
+  }
+
+  return normalized.trim();
+}
+
+export { normalizeSummaryOutput };
 
 // 全域影片級翻譯排隊調度器 (Video-level Translation Queue Scheduler)
 class TranslationQueueManager {
@@ -130,18 +190,23 @@ export async function translateWithOllama(englishText, modelName = ollamaModelCo
 此 Podcast 內容與社交舞（Salsa、Bachata、Kizomba 等雙人社交舞/Social Dancing）與音樂文化密切相關。
 
 翻譯規範：
-1. 請保持文筆自然、感性且流暢，不要生硬地字對字翻譯。
-2. 對於專業領域名詞，請務必遵循社交雙人舞領域的慣用術語。例如：
+1. 請保持文筆自然、感性且流暢，但不要寫成解說文、評論文或自我介紹。
+2. 請直接輸出翻譯結果，不要加上「好的」「以下是」「我來翻譯」這類前導語。
+3. 對於專業領域名詞，請務必遵循社交雙人舞領域的慣用術語。例如：
    - "Salsa" 一律翻譯為「Salsa」或「莎莎舞」，絕對不要翻譯成「桑巴舞」、「沙薩」或簡體字。
    - "Bachata" 一律翻譯為「Bachata」或「巴恰塔」。
    - "Kizomba" 一律保留為「Kizomba」。
+   - "Brazilian Zouk" 一律翻譯為「Brazilian Zouk 舞」，絕對不要翻譯成「巴西佐克」或「佐克舞」。
+   - 語音辨識錯誤修正：字幕中的人名 "Alison Sanji" 或 "Alisson Sanji" 實為 Zouk 圈知名舞者 "Alisson Sandi"，請一律更正並翻譯為「Alisson Sandi」或「艾莉森」，切勿使用「阿倫．桑吉」。
    - "congress" 或 "congresses" 指的是「舞蹈節」或「舞蹈大會」，絕對不要翻譯成「國會」或「議會」。
    - "social" 或 "socials" 指的是「舞會」或「社交舞會」，而非「社會」或「社交的」。
    - "lineup" 或 "lineups" 指的是「師資陣容」或「演出陣容」。
    - "festival" 指的是「舞蹈節」。
    - "workshop" 或 "workshops" 指的是「大師課」或「工作坊」。
-3. 對於非領域名詞（如科技、人名），需保持台灣習用語，必要時保留英文。
-4. 輸出格式必須僅包含翻譯後的繁體中文，不要包含任何前導詞或附帶說明。
+4. 對於非領域名詞（如科技、人名），需保持台灣習用語，必要時保留英文。
+5. 如果原文出現專有名詞或縮寫，請保留原文或使用台灣常見寫法，不要自行發明新譯名。
+6. 輸出格式必須僅包含翻譯後的繁體中文，不要包含任何前導詞、標題、項目符號或附帶說明。
+7. 若句子很短，也請完整翻譯成自然中文，不要補充延伸評論。
 
 英文原文：
 "${englishText}"
@@ -164,7 +229,7 @@ export async function translateWithOllama(englishText, modelName = ollamaModelCo
       throw new Error(`Ollama 響應失敗: ${response.status}`);
     }
     const data = await response.json();
-    return normalizeTraditionalChineseOutput(data.message.content);
+    return normalizeSummaryOutput(data.message.content);
   } catch (err) {
     console.warn(`[Ollama] ⚠️ 本地 Ollama 呼叫失敗，將降級或報錯:`, err.message);
     throw err;
@@ -182,7 +247,11 @@ export async function summarizeWithOllama(fullEnglishText, modelName = ollamaMod
 - "Salsa" 一律寫成「Salsa」或「莎莎舞」，絕對不要寫成「桑巴舞」、「沙薩」或簡體字。
 - "Bachata" 一律寫成「Bachata」或「巴恰塔」。
 - "Kizomba" 一律保留為「Kizomba」。
+- "Brazilian Zouk" 一律寫成「Brazilian Zouk 舞」，絕對不要寫成「巴西佐克」。
 - "social" 或 "socials" 在舞蹈脈絡下指「舞會」或「社交舞會」。
+- 請直接輸出內容本身，不要在開頭加上寒暄、贅詞、標題、前言或「好的，以下是」這類回應語。
+- 如果要用條列，直接從第一個重點開始，不要先寫引言。
+- 不要輸出簡體字。
 
 Podcast 內容：
 "${fullEnglishText}"
@@ -221,6 +290,7 @@ export async function translateTitleToSlug(title, videoId) {
 1. 必須僅輸出 URL Slug：全部小寫，只包含英文字母、數字與連字號（-），例如 "weekly-phrase-theater-0602"。
 2. 不要包含任何引號、前導詞、說明或任何非 URL 字元。
 3. 如果標題本來就是英文，請直接將其轉為 Slug 格式。
+4. 不要回覆句子、解釋或翻譯過程，只輸出最後 slug。
 
 影片標題：
 "${title}"

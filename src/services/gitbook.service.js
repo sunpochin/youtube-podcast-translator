@@ -101,6 +101,28 @@ async function publishToGitBookCore({ videoId, summary, translatedParagraphs, ti
 
   const youtubeWatchUrl = `https://www.youtube.com/watch?v=${videoId}`;
 
+  // 偵測影片是否源自 ZoukNerds Podcast (透過 YouTube oEmbed 查詢頻道名稱)
+  let isZoukNerds = false;
+  let originalTitle = title;
+  try {
+    const oembedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
+    if (oembedRes.ok) {
+      const oembedData = await oembedRes.json();
+      originalTitle = oembedData.title || title;
+      const channelName = oembedData.author_name || '';
+      if (channelName.toLowerCase().includes('zouknerds')) {
+        isZoukNerds = true;
+      }
+    }
+  } catch (err) {
+    console.warn('[GitBook] 偵測 ZoukNerds 失敗，使用標題備用判定:', err.message);
+  }
+
+  // 備用判定方案
+  if (!isZoukNerds) {
+    isZoukNerds = title.toLowerCase().includes('zouknerds') || slug.toLowerCase().includes('zouknerds');
+  }
+
   // 組裝 Markdown 內容。GitBook 的官方 embed block 會在發布後轉成可播放影片，
   // raw iframe 在 GitBook 同步流程中較容易被 sanitizer 或 Markdown parser 破壞。
   // 第一行印上自動產生的印章，以便後續辨識
@@ -109,6 +131,12 @@ async function publishToGitBookCore({ videoId, summary, translatedParagraphs, ti
   mdContent += `> 影片連結: [YouTube 網頁連結 (新分頁開啟)](${youtubeWatchUrl})\n\n`;
   mdContent += `### 影片嵌入觀看 (可邊放邊對照)\n\n`;
   mdContent += `{% embed url="${youtubeWatchUrl}" %}\n\n`;
+
+  if (isZoukNerds) {
+    mdContent += `## Video Source, Acknowledgement  影音來源\n\n`;
+    mdContent += `Special thanks to [Alisson Sandi](https://www.instagram.com/alisson.sandi/), host of the ZoukNerds Podcast, for graciously granting permission for this non-profit translation.\n\n`;
+    mdContent += `ZoukNerds: [${originalTitle}](${youtubeWatchUrl})\n\n`;
+  }
   
   if (summary) {
     mdContent += `## 核心主旨與關鍵看點\n\n${summary}\n\n`;

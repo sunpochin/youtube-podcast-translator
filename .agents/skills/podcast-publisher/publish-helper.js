@@ -111,13 +111,13 @@ async function main() {
       const youtubeWatchUrl = `https://www.youtube.com/watch?v=${videoId}`;
       let md = `${SIGNATURE_MARKER}\n`;
       md += `# 🎙️ ${title}\n\n`;
-      md += `> 影片連結: [YouTube 網頁連結 (新分頁開啟)](${youtubeWatchUrl})\n\n`;
-      md += `### 影片嵌入觀看 (可邊放邊對照)\n\n`;
+      // 改用 HTML 標籤來加入 target="_blank"
+      md += `> 影片連結: <a href="${youtubeWatchUrl}" target="_blank">YouTube 網頁連結 (新分頁開啟)</a>\n\n`;
       md += `{% embed url="${youtubeWatchUrl}" %}\n\n`;
 
       if (isZoukNerds) {
-        md += `## Acknowledgement 影音來源\n`;
-        md += `Special thanks to [Alisson Sandi](https://www.instagram.com/alisson.sandi/), host of the ZoukNerds Podcast, for graciously granting permission for this non-profit translation.\n`;
+        md += `## Video Source, Acknowledgement  影音來源\n\n`;
+        md += `Special thanks to [Alisson Sandi](https://www.instagram.com/alisson.sandi/), host of the ZoukNerds Podcast, for graciously granting permission for this non-profit translation.\n\n`;
         md += `ZoukNerds: [${title}](${youtubeWatchUrl})\n\n`;
       }
 
