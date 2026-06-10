@@ -99,7 +99,6 @@ function normalizeSummaryOutput(text = '') {
     ['socials', '社交舞會'],
     ['social', '社交舞會'],
     ['DJs', 'DJ'],
-    ['DJs', 'DJ'],
     ['dj', 'DJ'],
     ['teachers', '老師'],
     ['teacher', '老師'],
