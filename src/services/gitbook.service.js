@@ -105,7 +105,9 @@ async function publishToGitBookCore({ videoId, summary, translatedParagraphs, ti
   let isZoukNerds = false;
   let originalTitle = title;
   try {
-    const oembedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`);
+    const oembedRes = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${videoId}&format=json`, {
+      signal: AbortSignal.timeout(3000)
+    });
     if (oembedRes.ok) {
       const oembedData = await oembedRes.json();
       originalTitle = oembedData.title || title;
